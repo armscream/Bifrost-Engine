@@ -579,6 +579,54 @@ copy_project_config :: proc(profile: rbs.Profile) {
 	fmt.printfln("  ../config -> %s/config", profile.output)
 }
 
+copy_project_scripts :: proc(profile: rbs.Profile) { 
+	fmt.println("")
+	fmt.println("--------------------------------------------------")
+	fmt.println("Copying project scripts")
+	fmt.println("--------------------------------------------------")
+
+	err := rbs.copy(profile, "../scripts", "scripts")
+
+	if err != nil {
+		fatal(
+			fmt.aprintf(
+				"ERROR: Failed to copy project scripts:\n\n" +
+				"  Source: ../scripts\n" +
+				"  Destination: %s/scripts\n" +
+				"  Error: %s",
+				profile.output,
+				err,
+			),
+		)
+	}
+
+	fmt.printfln("  ../assets -> %s/assets", profile.output)
+}
+
+copy_project_assets :: proc(profile: rbs.Profile) { 
+	fmt.println("")
+	fmt.println("--------------------------------------------------")
+	fmt.println("Copying project assets")
+	fmt.println("--------------------------------------------------")
+
+	err := rbs.copy(profile, "../assets", "assets")
+
+	if err != nil {
+		fatal(
+			fmt.aprintf(
+				"ERROR: Failed to copy project assets:\n\n" +
+				"  Source: ../assets\n" +
+				"  Destination: %s/assets\n" +
+				"  Error: %s",
+				profile.output,
+				err,
+			),
+		)
+	}
+
+	fmt.printfln("  ../assets -> %s/assets", profile.output)
+}
+
 
 // ============================================================================
 // DEBUG PRE-BUILD
@@ -594,6 +642,10 @@ pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	build_other_modules(project_config, profile)
 
 	copy_project_config(profile)
+
+	copy_project_scripts(profile)
+
+	copy_project_assets(profile)
 }
 
 
@@ -615,6 +667,10 @@ pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	build_editor_module(project_config, profile)
 
 	copy_project_config(profile)
+
+	copy_project_scripts(profile)
+
+	copy_project_assets(profile)
 }
 
 
@@ -632,6 +688,10 @@ pre_build_release :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	build_other_modules(project_config, profile)
 
 	copy_project_config(profile)
+
+	copy_project_scripts(profile)
+
+	copy_project_assets(profile)
 }
 
 
