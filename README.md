@@ -1,7 +1,6 @@
-YMIR ENGINE
-rewrite v3?
+BIFROST ENGINE
 
-![Ymir Engine Logo](Engine\src\assets\Ymir_Engine_Logo.png)   
+![Bifrost Engine Logo](Engine\src\assets\Bifrost_Engine_Logo.png)   
 
 How to build: 
 cd into Project\rbs and run: odin build . -out:rune.exe  
@@ -28,9 +27,9 @@ Module_Unload :: proc()
 Module_Update  :: proc(dt: f32)
 Module_Render  :: proc() // Optional, for renderers   
 
-Modules can be loaded dynamically at runtime, and unloaded when they are no longer needed. Typically they will load on engine_init and unload on engine_shutdown.
-
-Plugins are currently the same as modules, but will be different in the future.
+Module = Engine capability/provider.
+Plugin = Project/Editor extension.
+SDK = the stable public interface they use to communicate with Ymir, as well as for the programmer.
 
 Engine intent: 
 - PBR Renderer (main focus on the Bifrost_Renderer module, which will have Vulkan and MoltenVk backends)
@@ -43,6 +42,8 @@ Engine intent:
 I had this working in the old engine, add a replication component to an entity and it will replicate all dirty components set to replicate based off of individual protocols. Really handy system - reduces cognitive load significantly.
 - Editor - IMGUI or custom RMGUI, not a priority.
 - Networking - ENet is the best here, probably need a Steamworks component too.
+- Chunk system - this ties into replication, physics, rendering, and any entity queries. Think 2d chunks or 3d for voxel worlds. This partitions the world, allows for asset streaming, and a lot of optimizations.
+- AI/agent system - Not LLM, game AI. This would be a mix of GOAP and task-centred AI. 
 
 V1 intent:
 - Every part of the engine intent here is at a shippable state. Editor can be bare-bones.
