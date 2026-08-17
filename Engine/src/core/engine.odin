@@ -12,10 +12,10 @@ import "core:os"
 // ============================================================================
 
 Project_Settings :: struct {
-	project_name: string,
-	version:      string,
-	modules:      []Project_Module,
-	plugins:      []Project_Plugin,
+	project_name:  string,
+	using version: Version,
+	modules:       []Project_Module,
+	plugins:       []Project_Plugin,
 }
 
 Project_Module :: struct {
@@ -26,6 +26,12 @@ Project_Module :: struct {
 Project_Plugin :: struct {
 	name:    string,
 	enabled: bool,
+}
+
+Version :: struct {
+	major: u32,
+	minor: u32,
+	patch: u32,
 }
 
 // ============================================================================
@@ -42,7 +48,7 @@ GLOBAL_PROJECT_SETTINGS: Project_Settings = {}
 RUN_EDITOR: bool = false
 
 GLOBAL_MODULE_REGISTRY: Module_Registry
-GLOBAL_MODULE_REGISTRY: Plugin_Registry
+GLOBAL_PLUGIN_REGISTRY: Plugin_Registry
 
 // ============================================================================
 // Application Callback
@@ -71,7 +77,7 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 		return false
 	}
 
-	if !module_registry_init(&GLOBAL_MODULE_REGISTRY) {
+	if !module_registry_init(&GLOBAL_MODULE_REGISTRY, context.allocator) {
 		return false
 	}
 
@@ -83,11 +89,11 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 		return false
 	}
 
-	if !module_resolve_dependencies() {
+	if !module_resolve_dependencies(&GLOBAL_MODULE_REGISTRY) {
 		return false
 	}
 
-	if !module_register_all() {
+	if !module_register_all(&GLOBAL_MODULE_REGISTRY) {
 		return false
 	}
 
@@ -95,7 +101,7 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 		return false
 	}
 
-	if !module_activate_all() {
+	if !module_activate_all(&GLOBAL_MODULE_REGISTRY) {
 		return false
 	}
 
@@ -141,13 +147,14 @@ destroy :: proc() -> bool {
 	fmt.println(" ENGINE DESTROY")
 	fmt.println("========================================")
 
+	// Stop modules while their runtime dependencies still exist.
+	module_deactivate_all(&GLOBAL_MODULE_REGISTRY)
+	// Destroy Core runtime infrastructure.
 	scheduler_shutdown()
-
+	// plugins
 	plugin_unload_all()
-
-	module_deactivate_all()
-
-	module_unload_all()
+	// finally unload module DLLs.
+	module_unload_all(&GLOBAL_MODULE_REGISTRY)
 
 	module_registry_destroy(&GLOBAL_MODULE_REGISTRY)
 
@@ -163,7 +170,7 @@ destroy :: proc() -> bool {
 inject_default_project_settings :: proc() -> Project_Settings {
 	return Project_Settings {
 		project_name = "New Project",
-		version = "0.0.1",
+		version = Version{major = 0, minor = 0, patch = 1},
 		modules = {
 			Project_Module{name = "Bifrost_Renderer", enabled = true},
 			Project_Module{name = "DAG", enabled = true},
