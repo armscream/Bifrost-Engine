@@ -14,8 +14,8 @@ import "core:os"
 Project_Settings :: struct {
 	project_name:  string,
 	using version: Version,
-	modules:       []Project_Module,
-	plugins:       []Project_Plugin,
+	modules:       [dynamic]Project_Module,
+	plugins:       [dynamic]Project_Plugin,
 }
 
 Project_Module :: struct {
@@ -168,21 +168,25 @@ destroy :: proc() -> bool {
 }
 
 inject_default_project_settings :: proc() -> Project_Settings {
-	return Project_Settings {
-		project_name = "New Project",
-		version = Version{major = 0, minor = 0, patch = 1},
-		modules = {
-			Project_Module{name = "Bifrost_Renderer", enabled = true},
-			Project_Module{name = "DAG", enabled = true},
-			Project_Module{name = "ECS", enabled = true},
-			Project_Module{name = "Default_Input", enabled = false},
-			Project_Module{name = "Miniaudio", enabled = false},
-			Project_Module{name = "Box3D_Physics", enabled = false},
-			Project_Module{name = "ATLAS-RMGUI", enabled = false},
-			Project_Module{name = "Scripting", enabled = false},
-			Project_Module{name = "Editor", enabled = true},
-			Project_Module{name = "ENet", enabled = false},
-		},
-		plugins = {},
-	}
-}
+    // Explicitly allocate the dynamic array on the heap
+    modules := make([dynamic]Project_Module, 0, 10) // 0 len, 10 cap
+    
+    // Populate using append
+    append(&modules, Project_Module{name = "Bifrost_Renderer", enabled = true})
+    append(&modules, Project_Module{name = "DAG", enabled = true})
+    append(&modules, Project_Module{name = "ECS", enabled = true})
+    append(&modules, Project_Module{name = "Default_Input", enabled = false})
+    append(&modules, Project_Module{name = "Miniaudio", enabled = false})
+    append(&modules, Project_Module{name = "Box3D_Physics", enabled = false})
+    append(&modules, Project_Module{name = "ATLAS-RMGUI", enabled = false})
+    append(&modules, Project_Module{name = "Scripting", enabled = false})
+    append(&modules, Project_Module{name = "Editor", enabled = true})
+    append(&modules, Project_Module{name = "ENet", enabled = false})
+
+    return Project_Settings {
+        project_name = "New Project",
+        version = Version{major = 0, minor = 0, patch = 1},
+        modules = modules, // Returns the heap-allocated dynamic array
+        plugins = {},      // Empty literal is safe if plugins is a slice/dynamic array with 0 len
+    }
+}   

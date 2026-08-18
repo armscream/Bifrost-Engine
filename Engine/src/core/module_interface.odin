@@ -30,8 +30,6 @@ Module_Registry :: struct {
 	// Dependency resolution
 	dependency_order: [dynamic]ModuleHandle,
 	dependency_state: [dynamic]Module_Visit_State,
-	// Registration collection
-	registrations:    [dynamic]ModuleHandle,
 	// Lifecycle
 	initialized:      bool,
 	// Lookup
@@ -243,7 +241,7 @@ Module_API :: struct {
 	dependencies:     [^]Module_Dependency,
 	dependency_count: u32,
 	// DLL lifecycle.
-	// load module-owned state/resources
+	// allocate/initialize module-owned state/resources
 	load:             proc(ctx: ^Module_Context) -> bool,
 	// Collect/register services, systems, resources, events.
 	register:         proc(ctx: ^Module_Context) -> bool,
@@ -292,97 +290,60 @@ Module_Registration :: struct {
 // ============================================================================
 
 load_module :: proc(dll_name: string, ctx: Module_Context) -> (Loaded_Module, bool) {
-
 	mod := Loaded_Module{}
-
 	// ------------------------------------------------------------------------
 	// Load DLL
 	// ------------------------------------------------------------------------
-
 	library, ok := dynlib.load_library(dll_name)
-
 	if !ok {
 		log.error("Failed to load module '%s': %s\n", dll_name, dynlib.last_error())
-
 		return mod, false
 	}
-
 	mod.library = library
 	mod.ctx = ctx
-
-
 	// ------------------------------------------------------------------------
 	// Resolve API entry point
 	// ------------------------------------------------------------------------
-
 	ptr, found := dynlib.symbol_address(mod.library, "ymir_module_get_api")
-
 	if !found {
 		log.error("Module '%s' does not export ymir_module_get_api\n", dll_name)
-
 		dynlib.unload_library(mod.library)
-
 		return mod, false
 	}
-
-
 	get_api := cast(Module_Get_API)(ptr)
-
 	api := get_api()
-
 	if api == nil {
 		log.error("Module '%s' returned a null API\n", dll_name)
-
 		dynlib.unload_library(mod.library)
-
 		return mod, false
 	}
-
-
 	// ------------------------------------------------------------------------
 	// Validate API version
 	// ------------------------------------------------------------------------
-
 	if api.api_version != API_VERSION {
 		log.error("Module '%s' uses unsupported API version %d\n", dll_name, api.api_version)
-
 		dynlib.unload_library(mod.library)
-
 		return mod, false
 	}
-
-
 	// ------------------------------------------------------------------------
 	// Copy API table
 	// ------------------------------------------------------------------------
-
 	mod.api = api^
-
 	mod.state = Module_State.Loaded
-
-
 	// ------------------------------------------------------------------------
 	// Load module
 	// ------------------------------------------------------------------------
-
 	if mod.api.load != nil {
 		if !mod.api.load(&mod.ctx) {
 			log.error("Module '%s' failed to initialize\n", dll_name)
-
 			dynlib.unload_library(mod.library)
-
 			mod = {}
-
 			return mod, false
 		}
 	}
-
-
 	log.info("Loaded module: %s v%s\n", mod.api.identity.name, mod.api.identity.version)
-
 	return mod, true
 }
-
 
 // ============================================================================
 // UNLOAD MODULE
@@ -428,13 +389,6 @@ module_unload_all :: proc(registry: ^Module_Registry) -> bool {
 	log.info("All modules unloaded.")
 	return true
 }
-// ============================================================================
-// UPDATE
-// ============================================================================
-update_module :: proc(mod: ^Loaded_Module, dt: f32) {
-	if mod == nil || !mod.state.Loaded {return}
-	if mod.api.update != nil {mod.api.update(&mod.ctx, dt)}
-}
 
 @(private)
 module_registry_init :: proc(registry: ^Module_Registry, allocator: mem.Allocator) -> bool {
@@ -457,7 +411,6 @@ module_registry_init :: proc(registry: ^Module_Registry, allocator: mem.Allocato
 	registry.free_indices = make([dynamic]u32, 0, allocator)
 	registry.dependency_order = make([dynamic]ModuleHandle, 0, allocator)
 	registry.dependency_state = make([dynamic]Module_Visit_State, 0, allocator)
-	registry.registrations = make([dynamic]Module_Registration, 0, allocator)
 	registry.by_name = make(map[string]ModuleHandle, allocator)
 	for module_type in Module_Type {
 		registry.by_type[module_type] = make([dynamic]ModuleHandle, 0, allocator)
@@ -468,9 +421,7 @@ module_registry_init :: proc(registry: ^Module_Registry, allocator: mem.Allocato
 }
 @(private)
 module_registry_destroy :: proc(registry: ^Module_Registry) {
-	if registry == nil || !registry.initialized {
-		return
-	}
+	if registry == nil || !registry.initialized {return}
 
 	// Destroy module-owned registrations.
 	for i := 0; i < len(registry.modules); i += 1 {
@@ -482,8 +433,6 @@ module_registry_destroy :: proc(registry: ^Module_Registry) {
 	// destroy dependency state.
 	delete(registry.dependency_order)
 	delete(registry.dependency_state)
-	// destroy registration ordering
-	delete(registry.registrations)
 	// destroy type lookup arrays.
 	for module_type in Module_Type {
 		delete(registry.by_type[module_type])
@@ -513,13 +462,7 @@ module_registration_destroy :: proc(registration: ^Module_Registration) {
 	registration^ = {}
 }
 @(private)
-module_register_loaded :: proc(
-	registry: ^Module_Registry,
-	module: Loaded_Module,
-) -> (
-	ModuleHandle,
-	bool,
-) {
+module_register_loaded :: proc(registry: ^Module_Registry, module: ^Loaded_Module) -> (ModuleHandle, bool) {
 
 	if registry == nil || !registry.initialized {
 		return INVALID_MODULE_HANDLE, false
@@ -550,7 +493,6 @@ module_register_loaded :: proc(
 	// Reject duplicate names
 	if existing, found := registry.by_name[name]; found {
 		log.error("Cannot register module '%s': already registered (handle %v).", name, existing)
-
 		return INVALID_MODULE_HANDLE, false
 	}
 
@@ -560,7 +502,7 @@ module_register_loaded :: proc(
 	if len(registry.free_indices) > 0 {
 		last := len(registry.free_indices) - 1
 		index = registry.free_indices[last]
-		registry.free_indices = registry.free_indices[:last]
+		resize(&registry.free_indices, last)
 	} else {
 		index = u32(len(registry.modules))
 		append(&registry.modules, Loaded_Module{})
@@ -581,6 +523,7 @@ module_register_loaded :: proc(
 		}
 	}
 
+	registry.generations[index] = generation
 	// IMPORTANT:
 	// Store the generation back into the registry.
 	handle := ModuleHandle {
@@ -593,17 +536,15 @@ module_register_loaded :: proc(
 	module.registration = Module_Registration {
 		module = handle,
 	}
-
+	
 	// Store module
 	module.state = Module_State.Registered
 
-	registry.modules[index] = module
+	registry.modules[index] = module^
 	// Name lookup
 	registry.by_name[name] = handle
 	// Type lookup
 	append(&registry.by_type[module.api.identity.type], handle)
-	// Registration collection
-	append(&registry.registrations, module.registration)
 	// Complete
 	log.info(
 		"Registered module: %s v%d.%d.%d [%d:%d]",
@@ -1003,59 +944,28 @@ module_registry_remove_lookup :: proc(registry: ^Module_Registry, handle: Module
 		}
 	}
 }
-
 @(private)
 module_registry_release_slot :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> bool {
-
-	if registry == nil || !registry.initialized {
-		return false
-	}
-
+	if registry == nil || !registry.initialized {return false}
 	module, ok := module_registry_get(registry, handle)
-
-	if !ok {
-		return false
-	}
-
-	// ------------------------------------------------------------------------
-	// A module must not still have a loaded DLL when its registry slot
-	// is released.
-	// ------------------------------------------------------------------------
-
+	if !ok {return false}
+	// A module must not still have a loaded DLL when its registry slot is released.
 	if module.state != Module_State.Unloaded {
 		log.error(
 			"Cannot release module slot [%d:%d]: module is not unloaded.",
 			handle.index,
 			handle.generation,
 		)
-
 		return false
 	}
-
-	// ------------------------------------------------------------------------
 	// Remove lookup entries.
-	// ------------------------------------------------------------------------
-
 	module_registry_remove_lookup(registry, handle)
-
-	// ------------------------------------------------------------------------
 	// Destroy module registration.
-	// ------------------------------------------------------------------------
-
 	module_registration_destroy(&module.registration)
-
-	// ------------------------------------------------------------------------
-	// Clear module storage.
-	// ------------------------------------------------------------------------
-
-	registry.modules[handle.index] = Loaded_Module{}
-
-	// ------------------------------------------------------------------------
-	// Return slot to free list.
-	// ------------------------------------------------------------------------
-
-	append(&registry.free_indices, handle.index)
-
+	if handle.index < u32(len(registry.dependency_state)){
+		registry.dependency_state[handle.index] = .Unvisited}
+		registry.modules[handle.index] = Loaded_Module{}
+		append(&registry.free_indices, handle.index)
 	return true
 }
 // registration collection
@@ -1085,11 +995,18 @@ module_collect_registration :: proc(registry: ^Module_Registry, handle: ModuleHa
 			return false
 		}
 	}
-	// Add module to registration order.
-	append(&registry.registrations, handle)
 	log.info("Collected registration for module '%s'.", module.api.identity.name)
 
 	return true
+}
+@(private)
+module_collect_by_type :: proc(registry: ^Module_Registry, module_type: Module_Type, allocator: mem.Allocator) -> [dynamic]ModuleHandle {
+	result := make([dynamic]ModuleHandle, 0, allocator)
+	if registry == nil || !registry.initialized { return result }
+	for handle in registry.by_type[module_type] {
+		if module_is_valid(registry, handle) {append(&result, handle)}
+	}
+	return result
 }
 // ============================================================================
 // REGISTER ALL MODULES
@@ -1118,17 +1035,6 @@ module_register_all :: proc(registry: ^Module_Registry) -> bool {
 		log.info("No modules registered.")
 		return true
 	}
-	// ------------------------------------------------------------------------
-	// Clear any previous registration collection.
-	//
-	// Normally this should be empty because registration happens once during
-	// initialization, but clearing it makes this function deterministic if
-	// initialization is retried.
-	// ------------------------------------------------------------------------
-	for i := 0; i < len(registry.registrations); i += 1 {
-		module_registration_destroy(&registry.registrations[i])
-	}
-	clear(&registry.registrations)
 	// ------------------------------------------------------------------------
 	// Register in dependency order.
 	//
@@ -1173,7 +1079,6 @@ module_register_all :: proc(registry: ^Module_Registry) -> bool {
 		}
 		// Registration succeeded.
 		module.state = Module_State.Registered
-		append(&registry.registrations, handle)
 		log.info(
 			"Registered module: %s v%d.%d.%d",
 			module.api.identity.name,
@@ -1182,22 +1087,7 @@ module_register_all :: proc(registry: ^Module_Registry) -> bool {
 			module.api.identity.version.patch,
 		)
 	}
-	log.info("Module registration complete. %d modules registered.", len(registry.registrations))
 	return true
-}
-@(private)
-module_get_registration :: proc(
-	registry: ^Module_Registry,
-	handle: ModuleHandle,
-) -> (
-	^Module_Registration,
-	bool,
-) {
-	module, ok := module_registry_get(registry, handle)
-	if !ok {return nil, false}
-	if module.state == Module_State.Unloaded ||
-	   module.state == Module_State.Failed {return nil, false}
-	return &module.registration, true
 }
 // ============================================================================
 // ACTIVATE MODULE
@@ -1327,7 +1217,7 @@ module_deactivate_all :: proc(
 ) {
 	if registry == nil || !registry.initialized {return}
 	if len(registry.dependency_order) == 0  {return}
-	for i := len(registry.dependency_order) -1; i >= 0; 1 -= 1 {
+	for i := len(registry.dependency_order) -1; i >= 0; i -= 1 {
 		handle := registry.dependency_order[i]
 		module, ok := module_registry_get(registry, handle)
 		if !ok {continue}
