@@ -173,3 +173,10 @@ module_registration_add_event :: proc(registry: ^Module_Registry,
     append(&module_registration.events, registration)
     return true
 }
+
+@(private)
+module_load_project_modules :: proc() -> bool {
+    log.warn("module_load_project_modules() is not implemented")
+    // TODO: implement me
+    return true
+}

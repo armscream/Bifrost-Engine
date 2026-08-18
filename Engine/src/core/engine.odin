@@ -152,7 +152,7 @@ destroy :: proc() -> bool {
 	// Destroy Core runtime infrastructure.
 	scheduler_shutdown()
 	// plugins
-	plugin_unload_all()
+	plugin_unload_all(&GLOBAL_PLUGIN_REGISTRY)
 	// finally unload module DLLs.
 	module_unload_all(&GLOBAL_MODULE_REGISTRY)
 
@@ -167,6 +167,15 @@ destroy :: proc() -> bool {
 	return true
 }
 
+@(private)
+load_project_settings :: proc()-> bool{
+	if(os.exists("project.json")){return true}
+	//TODO: make this proc find the project.json file and then load the project settings, if unable then return false.
+	log.warn("load_project_settings: not yet implemented")
+	return true
+}
+// This injects the default project settings if no project settings are found.
+@(private)
 inject_default_project_settings :: proc() -> Project_Settings {
     // Explicitly allocate the dynamic array on the heap
     modules := make([dynamic]Project_Module, 0, 10) // 0 len, 10 cap
@@ -190,3 +199,14 @@ inject_default_project_settings :: proc() -> Project_Settings {
         plugins = {},      // Empty literal is safe if plugins is a slice/dynamic array with 0 len
     }
 }   
+// TODO: implement the DAG as a module.
+@(private)
+scheduler_build :: proc() -> bool {
+	log.warn("Scheduler build not implemented - scheduler not hooked up yet")
+	return true
+}
+@(private)
+scheduler_shutdown :: proc() -> bool {
+	log.warn("Scheduler shutdown not implemented - scheduler not hooked up yet")
+	return true
+}
