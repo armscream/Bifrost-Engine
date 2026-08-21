@@ -19,19 +19,19 @@ Project_Settings :: struct {
 
 Project_Module :: struct {
 	name:    string,
-	version:  Version,
+	version: Version,
 	enabled: bool,
 }
 
 Project_Extension :: struct {
 	name:    string,
-	version:  Version,
+	version: Version,
 	enabled: bool,
 }
 
 Project_Plugin :: struct {
 	name:    string,
-	version:  Version,
+	version: Version,
 	enabled: bool,
 }
 
@@ -40,7 +40,11 @@ Version :: struct {
 	minor: u32,
 	patch: u32,
 }
-BASEVERSION: Version = {major = 0, minor = 0, patch = 1}
+BASEVERSION: Version = {
+	major = 0,
+	minor = 0,
+	patch = 1,
+}
 
 // =====================
 // Global Project State
@@ -92,26 +96,27 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 	if !plugin_registry_init(&GLOBAL_PLUGIN_REGISTRY, context.allocator) do return false
 	if !service_registry_init(&GLOBAL_SERVICE_REGISTRY, context.allocator) do return false
 
-	// Load modules
+	// MODULES
 	if !module_load_project_modules() do return false
 	if !module_resolve_dependencies(&GLOBAL_MODULE_REGISTRY) do return false
 	if !module_register_all(&GLOBAL_MODULE_REGISTRY) do return false
 
-	// Load extensions
+	// EXTENSIONS
 	if !extension_load_project_extensions() do return false
-	if !extension_resolve_dependencies(&GLOBAL_EXTENSION_REGISTRY) do return false
-	if !extension_validate_targets(&GLOBAL_EXTENSION_REGISTRY, &GLOBAL_MODULE_REGISTRY) do return false
-	if !extension_register_all(&GLOBAL_EXTENSION_REGISTRY) do return false
+	// Resolve extension dependencies / targets
+	if !extension_resolve_dependencies(&GLOBAL_EXTENSION_REGISTRY, &GLOBAL_MODULE_REGISTRY) do return false
+	// Register extensions
+	if !extension_register_all(&GLOBAL_EXTENSION_REGISTRY, &GLOBAL_MODULE_REGISTRY) do return false
 
 	// Load Plugins
 	if !plugin_load_project_plugins() do return false
 	if !plugin_resolve_dependencies(&GLOBAL_PLUGIN_REGISTRY) do return false
 	if !plugin_register_all(&GLOBAL_PLUGIN_REGISTRY) do return false
 
-	// Core build
+	// Build engine scheduling after all systems have registered
 	if !scheduler_build() do return false
 
-	// Activation
+	// ACTIVATION
 	if !module_activate_all(&GLOBAL_MODULE_REGISTRY) do return false
 	if !extension_activate_all(&GLOBAL_EXTENSION_REGISTRY) do return false
 	if !plugin_activate_all(&GLOBAL_PLUGIN_REGISTRY) do return false
@@ -155,20 +160,19 @@ destroy :: proc() -> bool {
 	extension_deactivate_all(&GLOBAL_EXTENSION_REGISTRY)
 	// Stop modules while their runtime dependencies still exist.
 	module_deactivate_all(&GLOBAL_MODULE_REGISTRY)
-	
+
 	// Destroy Core runtime infrastructure.
 	scheduler_shutdown()
 
 	// UNLOAD prior to destroying
-	plugin_unload_all(&GLOBAL_PLUGIN_REGISTRY)
 	extension_unload_all(&GLOBAL_EXTENSION_REGISTRY)
-	module_unload_all(&GLOBAL_MODULE_REGISTRY)
-
-	// REGISTRIES
+	plugin_unload_all(&GLOBAL_PLUGIN_REGISTRY)
 	service_registry_destroy(&GLOBAL_SERVICE_REGISTRY)
-	plugin_registry_destroy(&GLOBAL_PLUGIN_REGISTRY)
+	module_unload_all(&GLOBAL_MODULE_REGISTRY)
 	extension_registry_destroy(&GLOBAL_EXTENSION_REGISTRY)
 	module_registry_destroy(&GLOBAL_MODULE_REGISTRY)
+	plugin_registry_destroy(&GLOBAL_PLUGIN_REGISTRY)
+
 
 	APPRUNHANDLE = nil
 
@@ -195,25 +199,52 @@ inject_default_project_settings :: proc() {
 		&GLOBAL_PROJECT_SETTINGS.modules,
 		Project_Module{name = "Bifrost_Renderer", version = BASEVERSION, enabled = true},
 	)
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "DAG", version = BASEVERSION, enabled = true})
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "ECS", version = BASEVERSION, enabled = true})
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "DAG", version = BASEVERSION, enabled = true},
+	)
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "ECS", version = BASEVERSION, enabled = true},
+	)
 	append(
 		&GLOBAL_PROJECT_SETTINGS.modules,
 		Project_Module{name = "Default_Input", version = BASEVERSION, enabled = false},
 	)
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "Miniaudio", version = BASEVERSION, enabled = false})
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "Miniaudio", version = BASEVERSION, enabled = false},
+	)
 	append(
 		&GLOBAL_PROJECT_SETTINGS.modules,
 		Project_Module{name = "Box3D_Physics", version = BASEVERSION, enabled = false},
 	)
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "ATLAS-RMGUI", version = BASEVERSION, enabled = false})
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "Scripting", version = BASEVERSION, enabled = false})
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "Editor", version = BASEVERSION, enabled = true})
-	append(&GLOBAL_PROJECT_SETTINGS.modules, Project_Module{name = "ENet", version = BASEVERSION, enabled = false})
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "ATLAS-RMGUI", version = BASEVERSION, enabled = false},
+	)
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "Scripting", version = BASEVERSION, enabled = false},
+	)
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "Editor", version = BASEVERSION, enabled = true},
+	)
+	append(
+		&GLOBAL_PROJECT_SETTINGS.modules,
+		Project_Module{name = "ENet", version = BASEVERSION, enabled = false},
+	)
 	// Default Extensions
-	append(&GLOBAL_PROJECT_SETTINGS.extensions, Project_Extension{name = "Example Extension", version = BASEVERSION, enabled = false})
+	append(
+		&GLOBAL_PROJECT_SETTINGS.extensions,
+		Project_Extension{name = "Example Extension", version = BASEVERSION, enabled = false},
+	)
 	// Default Plugins
-	append(&GLOBAL_PROJECT_SETTINGS.plugins, Project_Plugin{name = "Example Plugin", version = BASEVERSION, enabled = false})
+	append(
+		&GLOBAL_PROJECT_SETTINGS.plugins,
+		Project_Plugin{name = "Example Plugin", version = BASEVERSION, enabled = false},
+	)
 }
 // This creates a default project settings file and configs folder if not found.
 @(private)
