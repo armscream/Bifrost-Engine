@@ -52,7 +52,16 @@ RUN_EDITOR: bool = false
 
 GLOBAL_MODULE_REGISTRY: Module_Registry
 GLOBAL_PLUGIN_REGISTRY: Plugin_Registry
+GLOBAL_EXTENSION_REGISTRY: Extension_Registry
 GLOBAL_SERVICE_REGISTRY: Service_Registry
+
+Load_State :: enum u32 {
+	Unloaded,
+	Loaded,
+	Registered,
+	Active,
+	Failed,
+}
 
 // =====================
 // Application Callback
@@ -72,13 +81,15 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 	fmt.println(" ENGINE INIT")
 	fmt.println("========================================")
 
+	// Project Settings
 	if !load_project_settings() {
 		setup_default_project_settings_file()
 	}
 
 	// Init registries
 	if !module_registry_init(&GLOBAL_MODULE_REGISTRY, context.allocator) do return false
-	if !plugin_registry_init(&GLOBAL_PLUGIN_REGISTRY) do return false
+	if !extension_registry_init(&GLOBAL_EXTENSION_REGISTRY, context.allocator) do return false
+	if !plugin_registry_init(&GLOBAL_PLUGIN_REGISTRY, context.allocator) do return false
 	if !service_registry_init(&GLOBAL_SERVICE_REGISTRY, context.allocator) do return false
 
 	// Load modules
@@ -86,9 +97,24 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 	if !module_resolve_dependencies(&GLOBAL_MODULE_REGISTRY) do return false
 	if !module_register_all(&GLOBAL_MODULE_REGISTRY) do return false
 
+	// Load extensions
+	if !extension_load_project_extensions() do return false
+	if !extension_resolve_dependencies(&GLOBAL_EXTENSION_REGISTRY) do return false
+	if !extension_validate_targets(&GLOBAL_EXTENSION_REGISTRY, &GLOBAL_MODULE_REGISTRY) do return false
+	if !extension_register_all(&GLOBAL_EXTENSION_REGISTRY) do return false
+
+	// Load Plugins
+	if !plugin_load_project_plugins() do return false
+	if !plugin_resolve_dependencies(&GLOBAL_PLUGIN_REGISTRY) do return false
+	if !plugin_register_all(&GLOBAL_PLUGIN_REGISTRY) do return false
+
+	// Core build
 	if !scheduler_build() do return false
 
+	// Activation
 	if !module_activate_all(&GLOBAL_MODULE_REGISTRY) do return false
+	if !extension_activate_all(&GLOBAL_EXTENSION_REGISTRY) do return false
+	if !plugin_activate_all(&GLOBAL_PLUGIN_REGISTRY) do return false
 
 	fmt.println("")
 	fmt.println("Engine initialization complete.")
@@ -124,19 +150,25 @@ destroy :: proc() -> bool {
 	fmt.println(" ENGINE DESTROY")
 	fmt.println("========================================")
 
+	// DEACTIVATE
+	plugin_deactivate_all(&GLOBAL_PLUGIN_REGISTRY)
+	extension_deactivate_all(&GLOBAL_EXTENSION_REGISTRY)
 	// Stop modules while their runtime dependencies still exist.
 	module_deactivate_all(&GLOBAL_MODULE_REGISTRY)
+	
 	// Destroy Core runtime infrastructure.
 	scheduler_shutdown()
-	// plugins
+
+	// UNLOAD prior to destroying
 	plugin_unload_all(&GLOBAL_PLUGIN_REGISTRY)
-
-	service_registry_destroy(&GLOBAL_SERVICE_REGISTRY)
-	// Unload module DLLs prior to destroying them.
+	extension_unload_all(&GLOBAL_EXTENSION_REGISTRY)
 	module_unload_all(&GLOBAL_MODULE_REGISTRY)
-	module_registry_destroy(&GLOBAL_MODULE_REGISTRY)
 
+	// REGISTRIES
+	service_registry_destroy(&GLOBAL_SERVICE_REGISTRY)
 	plugin_registry_destroy(&GLOBAL_PLUGIN_REGISTRY)
+	extension_registry_destroy(&GLOBAL_EXTENSION_REGISTRY)
+	module_registry_destroy(&GLOBAL_MODULE_REGISTRY)
 
 	APPRUNHANDLE = nil
 
