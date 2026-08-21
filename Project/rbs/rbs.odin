@@ -2,11 +2,14 @@ package build
 
 import "core:encoding/json"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
 import "../../Tools/rbs"
+
+import "../../Engine/src/Core"
 
 
 // ============================================================================
@@ -61,7 +64,7 @@ Project_Config :: struct {
 //
 // ============================================================================
 
-PROJECT_CONFIG_PATH :: "../config/project.json"
+PROJECT_CONFIG_PATH :: "config/project.json"
 
 ENGINE_MODULES_PATH :: "../../Engine/src/Modules"
 PROJECT_MODULES_PATH :: "../modules"
@@ -70,7 +73,12 @@ DEBUG_OUTPUT_PATH :: "../bin/Debug"
 EDITOR_OUTPUT_PATH :: "../bin/Editor"
 RELEASE_OUTPUT_PATH :: "../bin/Release"
 
-
+ConfigState :: enum {
+	None, // none found, continue and lets the engine create one
+	Failed,
+	Loaded, // loaded successfully
+}
+CONFIG_STATE := ConfigState.None
 // ============================================================================
 // GLOBAL CONFIGURATION
 // ============================================================================
@@ -80,16 +88,14 @@ RELEASE_OUTPUT_PATH :: "../bin/Release"
 // The project configuration is therefore loaded once and kept here for the
 // duration of the RBS process.
 //
-
 project_config: Project_Config
 
 
 // ============================================================================
 // FATAL ERROR
 // ============================================================================
-
 fatal :: proc(message: string) -> ! {
-	fmt.eprintln(message)
+	log.error(message)
 	os.exit(1)
 }
 
@@ -97,12 +103,10 @@ fatal :: proc(message: string) -> ! {
 // ============================================================================
 // PATH JOIN
 // ============================================================================
-
 join_project_path :: proc(a: string, b: string) -> string {
 	result, err := filepath.join({a, b}, context.allocator)
-
 	if err != nil {
-		fatal(fmt.aprintf("ERROR: Could not join paths:\n  %s\n  %s\n  %s", a, b, err))
+		fatal(fmt.aprintf("Could not join paths:\n  %s\n  %s\n  %s", a, b, err))
 	}
 
 	return result
@@ -128,7 +132,6 @@ join_project_path :: proc(a: string, b: string) -> string {
 //
 // Both contain no spaces.
 //
-
 command_path :: proc(path: string) -> string {
 	result := strings.clone(path)
 
@@ -141,7 +144,6 @@ command_path :: proc(path: string) -> string {
 // ============================================================================
 // LOAD PROJECT CONFIGURATION
 // ============================================================================
-
 load_project_config :: proc() -> Project_Config {
 	fmt.println("")
 	fmt.println("--------------------------------------------------")
@@ -149,19 +151,21 @@ load_project_config :: proc() -> Project_Config {
 	fmt.println("--------------------------------------------------")
 
 	if !os.exists(PROJECT_CONFIG_PATH) {
-		fatal(
-			fmt.aprintf("ERROR: Project configuration was not found:\n  %s", PROJECT_CONFIG_PATH),
-		)
+		log.error("Project configuration was not found:\n  %s", PROJECT_CONFIG_PATH)
+		CONFIG_STATE = .None
+		return Project_Config{}
 	}
 
 	// ------------------------------------------------------------------------
 	// Read file
 	// ------------------------------------------------------------------------
-
 	data, read_err := os.read_entire_file(PROJECT_CONFIG_PATH, context.allocator)
+	config: Project_Config
 
 	if read_err != nil {
-		fatal(fmt.aprintf("ERROR: Could not read project configuration:\n  %s", read_err))
+		log.error("Could not read project configuration:\n  %s", read_err)
+		CONFIG_STATE = .Failed
+		return config
 	}
 
 	defer delete(data)
@@ -169,19 +173,18 @@ load_project_config :: proc() -> Project_Config {
 	// ------------------------------------------------------------------------
 	// Parse JSON
 	// ------------------------------------------------------------------------
-
-	config: Project_Config
-
 	json_err := json.unmarshal(data, &config)
 
 	if json_err != nil {
-		fatal(fmt.aprintf("ERROR: Could not parse project configuration:\n  %s", json_err))
+		log.error("Could not parse project configuration:\n  %s", json_err)
+		CONFIG_STATE = .Failed
+		return config
 	}
 
 	fmt.printfln("  Project: %s", config.project_name)
 
 	fmt.printfln("  Version: %s", config.version)
-
+	CONFIG_STATE = .Loaded
 	return config
 }
 
@@ -265,7 +268,6 @@ resolve_module_source :: proc(input: string) -> string {
 	// ------------------------------------------------------------------------
 	// Not found
 	// ------------------------------------------------------------------------
-
 	fatal(
 		fmt.aprintf(
 			"ERROR: Required module source was not found:\n\n" +
@@ -284,7 +286,6 @@ resolve_module_source :: proc(input: string) -> string {
 // ============================================================================
 // BUILD ONE MODULE DLL
 // ============================================================================
-
 build_module :: proc(input: string, profile: rbs.Profile) {
 	if input == "" {
 		return
@@ -409,7 +410,6 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	// ------------------------------------------------------------------------
 	// Run Odin
 	// ------------------------------------------------------------------------
-
 	err := rbs.run_script(command)
 
 	if err != nil {
@@ -434,7 +434,6 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	// ------------------------------------------------------------------------
 	// Verify DLL
 	// ------------------------------------------------------------------------
-
 	if !os.exists(output) {
 		fatal(
 			fmt.aprintf(
@@ -451,7 +450,6 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 // ============================================================================
 // BUILD CORE MODULES
 // ============================================================================
-
 build_core_modules :: proc(config: Project_Config, profile: rbs.Profile) {
 	fmt.println("")
 	fmt.println("==================================================")
@@ -475,7 +473,6 @@ build_core_modules :: proc(config: Project_Config, profile: rbs.Profile) {
 // ============================================================================
 // BUILD PLUGINS
 // ============================================================================
-
 build_plugins :: proc(config: Project_Config, profile: rbs.Profile) {
 	if len(config.plugins) == 0 {
 		return
@@ -495,7 +492,6 @@ build_plugins :: proc(config: Project_Config, profile: rbs.Profile) {
 // ============================================================================
 // BUILD OTHER MODULES
 // ============================================================================
-
 build_other_modules :: proc(config: Project_Config, profile: rbs.Profile) {
 	if len(config.other_modules) == 0 {
 		return
@@ -515,7 +511,6 @@ build_other_modules :: proc(config: Project_Config, profile: rbs.Profile) {
 // ============================================================================
 // BUILD EDITOR MODULE
 // ============================================================================
-
 build_editor_module :: proc(config: Project_Config, profile: rbs.Profile) {
 	if config.editor_dll == "" {
 		return
@@ -579,7 +574,7 @@ copy_project_config :: proc(profile: rbs.Profile) {
 	fmt.printfln("  ../config -> %s/config", profile.output)
 }
 
-copy_project_scripts :: proc(profile: rbs.Profile) { 
+copy_project_scripts :: proc(profile: rbs.Profile) {
 	fmt.println("")
 	fmt.println("--------------------------------------------------")
 	fmt.println("Copying project scripts")
@@ -603,7 +598,7 @@ copy_project_scripts :: proc(profile: rbs.Profile) {
 	fmt.printfln("  ../assets -> %s/assets", profile.output)
 }
 
-copy_project_assets :: proc(profile: rbs.Profile) { 
+copy_project_assets :: proc(profile: rbs.Profile) {
 	fmt.println("")
 	fmt.println("--------------------------------------------------")
 	fmt.println("Copying project assets")
@@ -721,41 +716,21 @@ pre_build :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 // ============================================================================
 
 main :: proc() {
+	context.logger = log.create_console_logger()
 	// ------------------------------------------------------------------------
 	// RBS context
 	// ------------------------------------------------------------------------
-
 	ctx := rbs.init_context()
-
 	defer rbs.dispose_context(ctx)
 
 	// ------------------------------------------------------------------------
 	// Load project configuration
 	// ------------------------------------------------------------------------
-
 	project_config = load_project_config()
-
-	// ------------------------------------------------------------------------
-	// Header
-	// ------------------------------------------------------------------------
-
-	fmt.println("")
-	fmt.println("==================================================")
-	fmt.println(" Odin Practice Build System")
-	fmt.println("==================================================")
-
-	fmt.printfln(" Project: %s", project_config.project_name)
-
-	fmt.printfln(" Version: %s", project_config.version)
-
-	fmt.printfln(" Config:  %s", PROJECT_CONFIG_PATH)
-
-	fmt.println("==================================================")
 
 	// ========================================================================
 	// DEBUG PROFILE
 	// ========================================================================
-
 	rbs.add_profile(
 		&ctx,
 		"DEBUG",
@@ -806,16 +781,46 @@ main :: proc() {
 		},
 	)
 
+	switch CONFIG_STATE {
+	case .None:
+		log.warn("Starting engine without project.json..")
+		return
+	case .Failed:
+		log.error(
+			"Failed to load project configuration, please check your project.json file format.",
+		)
+		log.destroy_console_logger(context.logger)
+		os.exit(1)
+	case .Loaded:
+		log.info("Loaded project configuration.")
+		// ------------------------------------------------------------------------
+		// Header
+		// ------------------------------------------------------------------------
+
+		fmt.println("")
+		fmt.println("==================================================")
+		fmt.println(" Odin Practice Build System")
+		fmt.println("==================================================")
+
+		fmt.printfln(" Project: %s", project_config.project_name)
+
+		fmt.printfln(" Version: %s", project_config.version)
+
+		fmt.printfln(" Config:  %s", PROJECT_CONFIG_PATH)
+
+		fmt.println("==================================================")
+
+		return
+	}
+
 	// ========================================================================
 	// PRE-BUILD
 	// ========================================================================
-
 	rbs.add_pre_build_step(&ctx, pre_build)
 
 	// ========================================================================
 	// DEFAULT RUN COMMAND
 	// ========================================================================
-
 	rbs.add_command(&ctx, "", proc(ctx: rbs.Context, profile: rbs.Profile) {
 		rbs.exec_odin_cmd(ctx, .Run, profile)
 	})
@@ -823,7 +828,6 @@ main :: proc() {
 	// ========================================================================
 	// RUN COMMAND
 	// ========================================================================
-
 	rbs.add_command(&ctx, "run", proc(ctx: rbs.Context, profile: rbs.Profile) {
 		rbs.exec_odin_cmd(ctx, .Run, profile)
 	})
@@ -838,6 +842,6 @@ main :: proc() {
 	// ========================================================================
 	// PROCESS CLI
 	// ========================================================================
-
 	rbs.process(ctx)
+	log.destroy_console_logger(context.logger)
 }

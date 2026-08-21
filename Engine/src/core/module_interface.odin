@@ -2,7 +2,6 @@
 package Core
 
 import "core:dynlib"
-import "core:flags/example"
 import "core:log"
 import "core:mem"
 
@@ -21,7 +20,6 @@ import "core:mem"
 //
 // ============================================================================
 
-//
 Module_Registry :: struct {
 	allocator:        mem.Allocator,
 	modules:          [dynamic]Loaded_Module,
@@ -46,21 +44,7 @@ Module_Visit_State :: enum {
 	Visited, // completely resolved.
 }
 
-Plugin_Registry :: struct {
-	Plugins:      [dynamic]Loaded_Module,
-	free_indices: [dynamic]u32,
-	by_name:      map[string]PluginHandle,
-	by_type:      [Module_Type][dynamic]PluginHandle,
-}
-
-// ============================================================================
-// VERSION
-// ============================================================================
 API_VERSION :: 1
-
-// ============================================================================
-// MODULE TYPES
-// ============================================================================
 
 Module_Type :: enum u32 {
 	Engine,
@@ -77,10 +61,6 @@ Module_Type :: enum u32 {
 	Other,
 }
 
-// ============================================================================
-// MODULE FLAGS
-// ============================================================================
-
 Module_Flags :: bit_set[Module_Flag]
 
 Module_Flag :: enum u32 {
@@ -96,20 +76,10 @@ Module_Flag :: enum u32 {
 // ============================================================================
 // MODULE CAPABILITIES
 // ============================================================================
-//
 // Capabilities describe what a module provides.
-//
-// Example:
-//
-// Bifrost_Renderer:
-//
-//     Renderer
-//     GPU
-//     Materials
-//     Textures
-//
-// ============================================================================
+// Example: Bifrost_Renderer: Renderer, GPU, Materials, Textures
 
+// ============================================================================
 Module_Capability :: enum u32 {
 	Renderer,
 	Input,
@@ -131,10 +101,6 @@ Module_Capability :: enum u32 {
 	Custom,
 }
 
-// ============================================================================
-// MODULE IDENTITY
-// ============================================================================
-
 Module_Identity :: struct {
 	name:         cstring,
 	version:      Version,
@@ -145,10 +111,6 @@ Module_Identity :: struct {
 	capabilities: Module_Capabilities,
 }
 Module_Capabilities :: bit_set[Module_Capability]
-
-// ============================================================================
-// MODULE DEPENDENCY
-// ============================================================================
 
 Module_Dependency :: struct {
 	name:            cstring,
@@ -218,15 +180,18 @@ version_satisfies :: proc(version: Version, dependency: Module_Dependency) -> bo
 
 Module_Context :: struct {
 	api_version:     u32,
-	// Core-owned allocator.
+	// Core memory allocator.
 	allocator:       rawptr,
+	// the module's own identity.
+	self: ModuleHandle,
+	// Core-owned systems.
 	module_registry: rawptr,
-	// runtime systems.
+	service_registry: rawptr,
+	// runtime infrastructure.
 	scheduler:       rawptr,
-	services:        rawptr,
 	events:          rawptr,
-	//  module registration.
-	registration:    rawptr,
+	//  registration API.
+	registration:    ^Module_Registration_API,
 }
 
 // ============================================================================
@@ -255,6 +220,13 @@ Module_API :: struct {
 }
 
 Module_Get_API :: proc() -> ^Module_API
+
+Module_Registration_API :: struct {
+	add_service: proc(ctx: ^Module_Context, registration: Service_Registration) -> bool,
+	add_system: proc(ctx: ^Module_Context, registration: System_Registration) -> bool,
+	add_resource: proc(ctx: ^Module_Context, registration: Resource_Registration) -> bool,
+	add_event: proc(ctx: ^Module_Context, registration: Event_Registration) -> bool,
+}
 
 // ============================================================================
 // LOADED MODULE/PLUGIN
@@ -356,40 +328,6 @@ unload_module :: proc(mod: ^Loaded_Module) {
 	if mod.library != nil {dynlib.unload_library(mod.library)}
 	mod^ = {}
 }
-// ============================================================================
-// UNLOAD ALL MODULES
-// ============================================================================
-//
-// Unloads modules in reverse dependency order.
-//
-// Modules must already be deactivated before this function is called.
-// ============================================================================
-@(private)
-module_unload_all :: proc(registry: ^Module_Registry) -> bool {
-	if registry == nil || !registry.initialized {return false}
-	if len(registry.dependency_order) == 0 {return true}
-	for i := len(registry.dependency_order)-1; i >= 0; i -= 1 {
-		handle := registry.dependency_order[i]
-		module, ok := module_registry_get(registry, handle)
-		if !ok {continue}
-		// never unload an active module.
-		if module.state == Module_State.Active {
-			log.error("Cannot unload active module: %s.", "Module must be deactivated first.",
-			module.api.identity.name)
-			return false
-		}
-		if module.state != Module_State.Registered &&
-		module.state != Module_State.Unloaded {continue}
-		log.info("Unloading module: %s.", module.api.identity.name)
-		unload_module(module)
-		// Release the registry slot.
-		module_registry_release_slot(registry, handle)
-	}
-	clear(&registry.dependency_order)
-	log.info("All modules unloaded.")
-	return true
-}
-
 @(private)
 module_registry_init :: proc(registry: ^Module_Registry, allocator: mem.Allocator) -> bool {
 	if registry == nil {return false}
@@ -848,16 +786,11 @@ module_resolve_visit :: proc(registry: ^Module_Registry, handle: ModuleHandle) -
 
 // public resolver
 module_resolve_dependencies :: proc(registry: ^Module_Registry) -> bool {
-
-	if registry == nil || !registry.initialized {
-		return false
-	}
-
+	if registry == nil || !registry.initialized do return false
 	// ------------------------------------------------------------------------
 	// Clear previous resolution state.
 	// ------------------------------------------------------------------------
-
-	clear(&registry.dependency_order)
+	resize(&registry.dependency_order, 0)
 
 	required_state_count := len(registry.modules)
 
@@ -872,23 +805,14 @@ module_resolve_dependencies :: proc(registry: ^Module_Registry) -> bool {
 	// ------------------------------------------------------------------------
 	// Resolve every registered module.
 	// ------------------------------------------------------------------------
-
 	for i := 1; i < len(registry.modules); i += 1 {
-
 		module := &registry.modules[i]
-
 		// Slot is empty.
-		if module.state == Module_State.Unloaded || module.state == Module_State.Failed {
-			continue
-		}
-
+		if module.state == Module_State.Unloaded || module.state == Module_State.Failed do continue
 		handle := module.handle
-
 		if !module_resolve_visit(registry, handle) {
-			clear(&registry.dependency_order)
-
+			resize(&registry.dependency_order, 0)
 			log.error("Module dependency resolution failed.")
-
 			return false
 		}
 	}
@@ -985,9 +909,14 @@ module_collect_registration :: proc(registry: ^Module_Registry, handle: ModuleHa
 		)
 		return false
 	}
-
+	// Construct module context.
+	module.ctx.self = handle
+	module.ctx.module_registry = registry
+	// The service registry is supplied later from Core's global runtime state.
+	// for now, leave the existing value intact if it has already been set
+	// during module loading.
+	module.ctx.registration = &GLOBAL_MODULE_REGISTRATION_API
 	// Call the module's registration entry point.
-	module.ctx.registration = &module.registration
 	if module.api.register != nil {
 		if !module.api.register(&module.ctx) {
 			log.error("Module '%s' failed registration.", module.api.identity.name)
@@ -1002,227 +931,9 @@ module_collect_registration :: proc(registry: ^Module_Registry, handle: ModuleHa
 @(private)
 module_collect_by_type :: proc(registry: ^Module_Registry, module_type: Module_Type, allocator: mem.Allocator) -> [dynamic]ModuleHandle {
 	result := make([dynamic]ModuleHandle, 0, allocator)
-	if registry == nil || !registry.initialized { return result }
+	if registry == nil || !registry.initialized do return result
 	for handle in registry.by_type[module_type] {
 		if module_is_valid(registry, handle) {append(&result, handle)}
 	}
 	return result
-}
-// ============================================================================
-// REGISTER ALL MODULES
-// ============================================================================
-//
-// Calls the registration callback for every module in dependency order.
-//
-// Registration is intentionally separate from activation.
-//
-// A module's register() callback should:
-//
-//     - declare/register services
-//     - declare/register systems
-//     - declare resources
-//     - declare events
-//
-// It should NOT start runtime execution yet.
-//
-// This allows Core to collect the complete module graph before the scheduler
-// and other runtime systems are constructed.
-// ============================================================================
-@(private)
-module_register_all :: proc(registry: ^Module_Registry) -> bool {
-	if registry == nil || !registry.initialized {return false}
-	if len(registry.dependency_order) == 0 {
-		log.info("No modules registered.")
-		return true
-	}
-	// ------------------------------------------------------------------------
-	// Register in dependency order.
-	//
-	// Because dependency_order is post-order DFS, dependencies appear before
-	// modules that depend on them.
-	// ------------------------------------------------------------------------
-	for handle in registry.dependency_order {
-		module, ok := module_registry_get(registry, handle)
-		if !ok {
-			log.error(
-				"Cannot register module: dependency order contains invalid handle [%d:%d].",
-				handle.index,
-				handle.generation,
-			)
-			return false
-		}
-		// A module should be loaded immediately before registration.
-		if module.state != Module_State.Loaded {
-			log.error(
-				"Cannot register module '%s': expected Loaded state, got %v",
-				module.api.identity.name,
-				module.state,
-			)
-			return false
-		}
-		// Prepare registration collection.
-		module.registration = Module_Registration {
-			module    = handle,
-			services  = make([dynamic]Service_Registration, 0, registry.allocator),
-			systems   = make([dynamic]System_Registration, 0, registry.allocator),
-			resources = make([dynamic]Resource_Registration, 0, registry.allocator),
-			events    = make([dynamic]Event_Registration, 0, registry.allocator),
-		}
-		// Call module registration callback.
-		if module.api.register != nil {
-			if !module.api.register(&module.ctx) {
-				log.error("Module '%s' failed registration.", module.api.identity.name)
-				module.state = Module_State.Failed
-				module_registration_destroy(&module.registration)
-				return false
-			}
-		}
-		// Registration succeeded.
-		module.state = Module_State.Registered
-		log.info(
-			"Registered module: %s v%d.%d.%d",
-			module.api.identity.name,
-			module.api.identity.version.major,
-			module.api.identity.version.minor,
-			module.api.identity.version.patch,
-		)
-	}
-	return true
-}
-// ============================================================================
-// ACTIVATE MODULE
-// ============================================================================
-//
-// Activates one registered module.
-//
-// Activation is deliberately separate from registration. Registration
-// declares the module's contributions to Core; activation starts the module's
-// actual runtime behavior.
-//
-// The caller is responsible for ensuring that global runtime infrastructure
-// such as the scheduler has already been constructed.
-// ============================================================================
-@(private)
-module_activate :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> bool {
-	if registry == nil || !registry.initialized {return false}
-
-	module, ok := module_registry_get(registry, handle)
-	if !ok {log.error("Cannot activate module [%d:%d]: invalid handle.", handle.index, handle.generation)
-		return false}
-	// Activation is only valid after registration.
-	if module.state !=
-	   Module_State.Registered {log.error("Cannot activate module '%s': expected Registered state, got %v.", module.api.identity.name, module.state)
-		return false}
-	// ------------------------------------------------------------------------
-	// Nothing to call if the module does not provide an activation callback.
-	//
-	// A module without activate() is still considered successfully active.
-	// This is useful for purely declarative modules.
-	// ------------------------------------------------------------------------
-	if module.api.activate != nil {
-		if !module.api.activate(&module.ctx) {
-			log.error("Module '%s' failed activation.", module.api.identity.name)
-			module.state = Module_State.Failed
-			return false
-		}
-	}
-	// Now activation succeeded.
-	module.state = Module_State.Active
-	log.info(
-		"Activated module: %s v%d.%d.%d",
-		module.api.identity.name,
-		module.api.identity.version.major,
-		module.api.identity.version.minor,
-		module.api.identity.version.patch,
-	)
-	return true
-}
-// ============================================================================
-// ACTIVATE ALL MODULES
-// ============================================================================
-//
-// Activates modules in dependency order.
-//
-// Because dependency_order contains dependencies before their dependents,
-// every module's prerequisites will already be active when its activate()
-// callback executes.
-// ============================================================================
-@(private)
-module_activate_all :: proc(registry: ^Module_Registry) -> bool {
-	if registry == nil || !registry.initialized {return false}
-	// No resolved modules means there is nothing to activate.
-	if len(registry.dependency_order) == 0 {
-		log.info("No modules to activate.")
-		return true
-	}
-	activated_count := 0
-	// Activate each module in dependency order.
-	for handle in registry.dependency_order {
-		if !module_activate(registry, handle) {
-			log.error("Failed to activate module '[%d:%d].", handle.index, handle.generation)
-
-			// Roll back everything activated before the failure.
-			for i := activated_count - 1; 1 >= 0; i -= 1 {
-				rollback_handle := registry.dependency_order[i]
-				module, valid := module_registry_get(registry, rollback_handle)
-				if !valid {
-					continue
-				}
-				if module.state == Module_State.Active {
-					module_deactivate(registry, rollback_handle)
-				}
-			}
-			return false
-		}
-		activated_count += 1
-	}
-	log.info("Module activation complete. %d modules activated.", len(registry.dependency_order))
-	return true
-}
-
-// ============================================================================
-// DEACTIVATE MODULE
-// ============================================================================
-//
-// Deactivates one active module.
-//
-// Deactivation does not unload the DLL or destroy its registration data.
-// The module remains Registered and can potentially be activated again.
-// ============================================================================
-@(private)
-module_deactivate :: proc(
-	registry: ^Module_Registry,
-	handle: ModuleHandle,
-) -> bool {
-	if registry == nil || !registry.initialized {return false}
-	module, ok := module_registry_get(registry, handle)
-	if !ok {return false}
-	if module.state != Module_State.Active {return false}
-	if module.api.deactivate != nil {module.api.deactivate(&module.ctx)}
-	module.state = Module_State.Registered
-	log.info("Deactivated module: %s", module.api.identity.name)
-	return true
-}
-// ============================================================================
-// DEACTIVATE ALL MODULES
-// ============================================================================
-//
-// Deactivates all active modules in reverse dependency order.
-//
-// Dependents are therefore stopped before the modules they depend upon.
-// ============================================================================
-@(private)
-module_deactivate_all :: proc(
-	registry: ^Module_Registry
-) {
-	if registry == nil || !registry.initialized {return}
-	if len(registry.dependency_order) == 0  {return}
-	for i := len(registry.dependency_order) -1; i >= 0; i -= 1 {
-		handle := registry.dependency_order[i]
-		module, ok := module_registry_get(registry, handle)
-		if !ok {continue}
-		if module.state != Module_State.Active {continue}
-		module_deactivate(registry, handle)
-	}
-	log.info("All modules deactivated.")
 }

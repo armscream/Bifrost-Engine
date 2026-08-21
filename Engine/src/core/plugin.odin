@@ -2,6 +2,8 @@
 package Core
 
 import "core:log"
+import "core:mem"
+import "core:dynlib"
 
 Plugin_API :: struct {
     api_version: u32,
@@ -15,6 +17,24 @@ Plugin_API :: struct {
     unload: proc(ctx: ^Plugin_Context),
 }
 
+Plugin_Registry :: struct { 
+    allocator: mem.Allocator,
+    plugins: [dynamic]Loaded_Plugin,
+    generations: [dynamic]u32,
+    free_indices: [dynamic]u32,
+    by_name: map[string]PluginHandle,
+    initialized: bool,
+}
+
+Loaded_Plugin :: struct {
+    handle: PluginHandle,
+    libary: dynlib.Library,
+    api: Plugin_API,
+    ctx: Plugin_Context,
+    state: Plugin_State,
+    registration: Plugin_Registry, // is it plugin_registration?
+}
+
 Plugin_Identity :: struct {
     name: string,
     author: string,
@@ -25,6 +45,14 @@ Plugin_Dependency :: struct {
     name: string,
     min_version: Version,
     max_version: Version,
+}
+
+Plugin_State :: enum u32 {
+	Unloaded,
+	Loaded,
+	Registered,
+	Active,
+	Failed,
 }
 
 Plugin_Context :: struct {

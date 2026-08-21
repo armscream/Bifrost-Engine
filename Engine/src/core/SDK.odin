@@ -17,42 +17,25 @@ import "core:mem"
 // ----------------------------------------------------------------------------
 // ENGINE
 // ----------------------------------------------------------------------------
-
 engine_is_editor :: proc() -> bool
 engine_is_running :: proc() -> bool
 engine_delta_time :: proc() -> f32
 
-
 // ============================================================================
 // MODULES
 // ============================================================================
-
 // Search for a module by name and returns its handle.
 module_find :: proc(registry: ^Module_Registry, name: string) -> (ModuleHandle, bool) {
-
-	if registry == nil || !registry.initialized {
-		return INVALID_MODULE_HANDLE, false
-	}
-
-	if len(name) == 0 {
-		return INVALID_MODULE_HANDLE, false
-	}
-
+	if registry == nil || !registry.initialized do return INVALID_MODULE_HANDLE, false
+	if len(name) == 0 do return INVALID_MODULE_HANDLE, false
 	handle, found := registry.by_name[name]
-
-	if !found {
-		return INVALID_MODULE_HANDLE, false
-	}
-
+	if !found do return INVALID_MODULE_HANDLE, false
 	// ------------------------------------------------------------------------
 	// Validate the lookup result.
 	//
 	// This protects against stale/corrupt lookup entries.
 	// ------------------------------------------------------------------------
-
-	if !module_is_valid(registry, handle) {
-		return INVALID_MODULE_HANDLE, false
-	}
+	if !module_is_valid(registry, handle) do return INVALID_MODULE_HANDLE, false
 
 	return handle, true
 }
@@ -127,27 +110,39 @@ module_has_capability :: proc(
 	return capability in module.api.identity.capabilities
 }
 
-
 // ============================================================================
 // SERVICES
 // ============================================================================
-
-service_find :: proc(name: string) -> (ServiceHandle, bool)
-service_is_valid :: proc(handle: ServiceHandle) -> bool
-service_get :: proc(handle: ServiceHandle) -> rawptr
+// Find service by name
+service_find :: proc(registry: ^Service_Registry, name: string) -> (ServiceHandle, bool) {
+    if registry == nil || !registry.initialized do return INVALID_SERVICE_HANDLE, false
+    if len(name) == 0 do return INVALID_SERVICE_HANDLE, false
+    handle, found := registry.by_name[name]
+    if !found do return INVALID_SERVICE_HANDLE, false
+    if _, valid := service_registry_get(registry, handle); !valid do return INVALID_SERVICE_HANDLE, false
+    return handle, true
+}
+service_is_valid_registry :: proc(registry: ^Service_Registry, handle: ServiceHandle) -> bool {
+	_, ok := service_registry_get(registry, handle)
+	return ok
+}
+// returns the service instance for the given handle
+service_get_registry :: proc(registry: ^Service_Registry, handle: ServiceHandle) -> rawptr {
+	service, ok := service_registry_get(registry, handle)
+	if !ok do return nil
+	return service.instance
+}
 
 
 // ----------------------------------------------------------------------------
 // EVENTS
 // ----------------------------------------------------------------------------
-
 emit_event :: proc(event: rawptr)
 
 
 // ----------------------------------------------------------------------------
 // ASSETS
 // ----------------------------------------------------------------------------
-
 asset_load :: proc(path: string) -> rawptr
 asset_unload :: proc(asset: rawptr)
 
@@ -155,7 +150,6 @@ asset_unload :: proc(asset: rawptr)
 // ----------------------------------------------------------------------------
 // ECS
 // ----------------------------------------------------------------------------
-
 entity_create :: proc() -> rawptr
 entity_destroy :: proc(entity: rawptr)
 
@@ -163,7 +157,6 @@ entity_destroy :: proc(entity: rawptr)
 // ----------------------------------------------------------------------------
 // RENDERING
 // ----------------------------------------------------------------------------
-
 renderer_begin_frame :: proc()
 renderer_end_frame :: proc()
 
@@ -171,12 +164,10 @@ renderer_end_frame :: proc()
 // ----------------------------------------------------------------------------
 // AUDIO
 // ----------------------------------------------------------------------------
-
 audio_play :: proc(sound: rawptr)
 
 
 // ----------------------------------------------------------------------------
 // PHYSICS
 // ----------------------------------------------------------------------------
-
 physics_raycast :: proc() -> bool
