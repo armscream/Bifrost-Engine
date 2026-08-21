@@ -17,7 +17,8 @@ import "core:mem"
 //     ymir_module_get_api
 //
 // Everything else is discovered through the returned API table.
-//
+// 
+// Modules = primary engine/runtime capabilities. They can provide systems, services, resources, events, etc.
 // ============================================================================
 
 Module_Registry :: struct {
@@ -112,15 +113,6 @@ Module_Identity :: struct {
 }
 Module_Capabilities :: bit_set[Module_Capability]
 
-Module_Dependency :: struct {
-	name:            cstring,
-	min_version:     Version,
-	max_version:     Version,
-	has_min_version: bool,
-	has_max_version: bool,
-	optional:        bool,
-}
-
 @(private)
 version_equal :: proc(a, b: Version) -> bool {
 	return a.major == b.major && a.minor == b.minor && a.patch == b.patch
@@ -150,7 +142,7 @@ version_greater_equal :: proc(a, b: Version) -> bool {
 	return !version_less(a, b)
 }
 @(private)
-version_satisfies :: proc(version: Version, dependency: Module_Dependency) -> bool {
+version_satisfies :: proc(version: Version, dependency: DLL_Dependency) -> bool {
 
 	if dependency.has_min_version {
 		if version_less(version, dependency.min_version) {
@@ -177,7 +169,6 @@ version_satisfies :: proc(version: Version, dependency: Module_Dependency) -> bo
 // Everything it needs should eventually be exposed through the SDK.
 //
 // ============================================================================
-
 Module_Context :: struct {
 	api_version:     u32,
 	// Core memory allocator.
@@ -199,11 +190,10 @@ Module_Context :: struct {
 // ============================================================================
 // This is the actual ABI exposed by the DLL.
 // ============================================================================
-
 Module_API :: struct {
 	api_version:      u32,
 	identity:         Module_Identity,
-	dependencies:     [^]Module_Dependency,
+	dependencies:     [^]DLL_Dependency,
 	dependency_count: u32,
 	// DLL lifecycle.
 	// allocate/initialize module-owned state/resources
@@ -237,16 +227,8 @@ Loaded_Module :: struct {
 	library:      dynlib.Library,
 	api:          Module_API,
 	ctx:          Module_Context,
-	state:        Module_State,
+	state:        Load_State,
 	registration: Module_Registration,
-}
-
-Module_State :: enum u32 {
-	Unloaded,
-	Loaded,
-	Registered,
-	Active,
-	Failed,
 }
 
 Module_Registration :: struct {
@@ -301,7 +283,7 @@ load_module :: proc(dll_name: string, ctx: Module_Context) -> (Loaded_Module, bo
 	// Copy API table
 	// ------------------------------------------------------------------------
 	mod.api = api^
-	mod.state = Module_State.Loaded
+	mod.state = Load_State.Loaded
 	// ------------------------------------------------------------------------
 	// Load module
 	// ------------------------------------------------------------------------
@@ -322,8 +304,8 @@ load_module :: proc(dll_name: string, ctx: Module_Context) -> (Loaded_Module, bo
 // ============================================================================
 unload_module :: proc(mod: ^Loaded_Module) {
 	if mod == nil {return}
-	if mod.state != Module_State.Loaded &&
-	mod.state != Module_State.Registered {return}
+	if mod.state != Load_State.Loaded &&
+	mod.state != Load_State.Registered {return}
 	if mod.api.unload != nil {mod.api.unload(&mod.ctx)}
 	if mod.library != nil {dynlib.unload_library(mod.library)}
 	mod^ = {}
@@ -364,7 +346,7 @@ module_registry_destroy :: proc(registry: ^Module_Registry) {
 	// Destroy module-owned registrations.
 	for i := 0; i < len(registry.modules); i += 1 {
 		module := &registry.modules[i]
-		if module.state != Module_State.Unloaded && module.state != Module_State.Failed {
+		if module.state != Load_State.Unloaded && module.state != Load_State.Failed {
 			module_registration_destroy(&module.registration)
 		}
 	}
@@ -407,7 +389,7 @@ module_register_loaded :: proc(registry: ^Module_Registry, module: ^Loaded_Modul
 	}
 
 	// Validate module state
-	if module.state != Module_State.Loaded {
+	if module.state != Load_State.Loaded {
 		log.error(
 			"Cannot register module '%s': module is not in Loaded state.",
 			module.api.identity.name,
@@ -476,7 +458,7 @@ module_register_loaded :: proc(registry: ^Module_Registry, module: ^Loaded_Modul
 	}
 	
 	// Store module
-	module.state = Module_State.Registered
+	module.state = Load_State.Registered
 
 	registry.modules[index] = module^
 	// Name lookup
@@ -557,7 +539,7 @@ module_registry_get :: proc(
 		return nil, false
 	}
 
-	if module.state == Module_State.Unloaded || module.state == Module_State.Failed {
+	if module.state == Load_State.Unloaded || module.state == Load_State.Failed {
 		return nil, false
 	}
 
@@ -568,7 +550,7 @@ module_registry_get :: proc(
 @(private)
 module_find_dependency :: proc(
 	registry: ^Module_Registry,
-	dependency: Module_Dependency,
+	dependency: DLL_Dependency,
 ) -> (
 	ModuleHandle,
 	bool,
@@ -595,7 +577,7 @@ module_find_dependency :: proc(
 @(private)
 module_version_satisfies_dependency :: proc(
 	module: ^Loaded_Module,
-	dependency: Module_Dependency,
+	dependency: DLL_Dependency,
 ) -> bool {
 
 	if module == nil {
@@ -808,7 +790,7 @@ module_resolve_dependencies :: proc(registry: ^Module_Registry) -> bool {
 	for i := 1; i < len(registry.modules); i += 1 {
 		module := &registry.modules[i]
 		// Slot is empty.
-		if module.state == Module_State.Unloaded || module.state == Module_State.Failed do continue
+		if module.state == Load_State.Unloaded || module.state == Load_State.Failed do continue
 		handle := module.handle
 		if !module_resolve_visit(registry, handle) {
 			resize(&registry.dependency_order, 0)
@@ -874,7 +856,7 @@ module_registry_release_slot :: proc(registry: ^Module_Registry, handle: ModuleH
 	module, ok := module_registry_get(registry, handle)
 	if !ok {return false}
 	// A module must not still have a loaded DLL when its registry slot is released.
-	if module.state != Module_State.Unloaded {
+	if module.state != Load_State.Unloaded {
 		log.error(
 			"Cannot release module slot [%d:%d]: module is not unloaded.",
 			handle.index,
@@ -902,7 +884,7 @@ module_collect_registration :: proc(registry: ^Module_Registry, handle: ModuleHa
 	if !ok {
 		return false
 	}
-	if module.state != Module_State.Registered {
+	if module.state != Load_State.Registered {
 		log.error(
 			"Cannot collect registration for module '%s': invalid state.",
 			module.api.identity.name,
@@ -920,7 +902,7 @@ module_collect_registration :: proc(registry: ^Module_Registry, handle: ModuleHa
 	if module.api.register != nil {
 		if !module.api.register(&module.ctx) {
 			log.error("Module '%s' failed registration.", module.api.identity.name)
-			module.state = Module_State.Failed
+			module.state = Load_State.Failed
 			return false
 		}
 	}

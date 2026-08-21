@@ -147,7 +147,7 @@ module_registration_validate_owner :: proc(
     if registry == nil || !registry.initialized do return nil, false
     module, ok := module_registry_get(registry, module_handle)
     if !ok do return nil, false
-    if module.state != Module_State.Registered {
+    if module.state != Load_State.Registered {
         log.error("Module [%d:%d] cannot register: module is not in Registered state.",
         module_handle.index, module_handle.generation)
         return nil, false
@@ -302,7 +302,7 @@ module_register_all :: proc(registry: ^Module_Registry) -> bool {
 			return false
 		}
 		// A module should be loaded immediately before registration.
-		if module.state != Module_State.Loaded {
+		if module.state != Load_State.Loaded {
 			log.error(
 				"Cannot register module '%s': expected Loaded state, got %v",
 				module.api.identity.name,
@@ -322,13 +322,13 @@ module_register_all :: proc(registry: ^Module_Registry) -> bool {
 		if module.api.register != nil {
 			if !module.api.register(&module.ctx) {
 				log.error("Module '%s' failed registration.", module.api.identity.name)
-				module.state = Module_State.Failed
+				module.state = Load_State.Failed
 				module_registration_destroy(&module.registration)
 				return false
 			}
 		}
 		// Registration succeeded.
-		module.state = Module_State.Registered
+		module.state = Load_State.Registered
 		log.info(
 			"Registered module: %s v%d.%d.%d",
 			module.api.identity.name,
@@ -361,7 +361,7 @@ module_activate :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> boo
 		return false}
 	// Activation is only valid after registration.
 	if module.state !=
-	   Module_State.Registered {log.error("Cannot activate module '%s': expected Registered state, got %v.", module.api.identity.name, module.state)
+	   Load_State.Registered {log.error("Cannot activate module '%s': expected Registered state, got %v.", module.api.identity.name, module.state)
 		return false}
 	// ------------------------------------------------------------------------
 	// Nothing to call if the module does not provide an activation callback.
@@ -372,12 +372,12 @@ module_activate :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> boo
 	if module.api.activate != nil {
 		if !module.api.activate(&module.ctx) {
 			log.error("Module '%s' failed activation.", module.api.identity.name)
-			module.state = Module_State.Failed
+			module.state = Load_State.Failed
 			return false
 		}
 	}
 	// Now activation succeeded.
-	module.state = Module_State.Active
+	module.state = Load_State.Active
 	log.info(
 		"Activated module: %s v%d.%d.%d",
 		module.api.identity.name,
@@ -418,7 +418,7 @@ module_activate_all :: proc(registry: ^Module_Registry) -> bool {
 				if !valid {
 					continue
 				}
-				if module.state == Module_State.Active {
+				if module.state == Load_State.Active {
 					module_deactivate(registry, rollback_handle)
 				}
 			}
@@ -446,9 +446,9 @@ module_deactivate :: proc(
 	if registry == nil || !registry.initialized {return false}
 	module, ok := module_registry_get(registry, handle)
 	if !ok {return false}
-	if module.state != Module_State.Active {return false}
+	if module.state != Load_State.Active {return false}
 	if module.api.deactivate != nil {module.api.deactivate(&module.ctx)}
-	module.state = Module_State.Registered
+	module.state = Load_State.Registered
 	log.info("Deactivated module: %s", module.api.identity.name)
 	return true
 }
@@ -470,7 +470,7 @@ module_deactivate_all :: proc(
 		handle := registry.dependency_order[i]
 		module, ok := module_registry_get(registry, handle)
 		if !ok {continue}
-		if module.state != Module_State.Active {continue}
+		if module.state != Load_State.Active {continue}
 		module_deactivate(registry, handle)
 	}
 	log.info("All modules deactivated.")
@@ -492,13 +492,13 @@ module_unload_all :: proc(registry: ^Module_Registry) -> bool {
 		module, ok := module_registry_get(registry, handle)
 		if !ok {continue}
 		// never unload an active module.
-		if module.state == Module_State.Active {
+		if module.state == Load_State.Active {
 			log.error("Cannot unload active module: %s.", "Module must be deactivated first.",
 			module.api.identity.name)
 			return false
 		}
-		if module.state != Module_State.Registered &&
-		module.state != Module_State.Unloaded {continue}
+		if module.state != Load_State.Registered &&
+		module.state != Load_State.Unloaded {continue}
 		log.info("Unloading module: %s.", module.api.identity.name)
 		unload_module(module)
 		// Release the registry slot.

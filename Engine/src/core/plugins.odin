@@ -5,10 +5,13 @@ import "core:log"
 import "core:mem"
 import "core:dynlib"
 
+// Plugins = project/tool/editor-side functionality that is not necessarily part of the engine's runtime module 
+// architecture. They can still use the SDK and services, but they shouldn't be treated as "modules with a different name."
+
 Plugin_API :: struct {
     api_version: u32,
-    identity: Plugin_Identity,
-    dependencies: [^]Plugin_Dependency,
+    identity: DLL_Identity,
+    dependencies: [^]DLL_Dependency,
     dependency_count: u32,
     load: proc(ctx: ^Plugin_Context)  -> bool,
     register: proc(ctx: ^Plugin_Context) -> bool,
@@ -31,35 +34,23 @@ Loaded_Plugin :: struct {
     libary: dynlib.Library,
     api: Plugin_API,
     ctx: Plugin_Context,
-    state: Plugin_State,
-    registration: Plugin_Registry, // is it plugin_registration?
+    state: Load_State,
+    registration: Plugin_Registration, // is it plugin_registration?
 }
 
-Plugin_Identity :: struct {
-    name: string,
-    author: string,
-    version: Version,
-}
-
-Plugin_Dependency :: struct {
-    name: string,
-    min_version: Version,
-    max_version: Version,
-}
-
-Plugin_State :: enum u32 {
-	Unloaded,
-	Loaded,
-	Registered,
-	Active,
-	Failed,
+// Plugin Registration
+Plugin_Registration :: struct {
+    services: [dynamic]Service_Registration,
+    systems: [dynamic]System_Registration,
+    resources: [dynamic]Resource_Registration,
+    events: [dynamic]Event_Registration,
 }
 
 Plugin_Context :: struct {
     //TODO: add more fields. This just makes this compile for now.
 }
 
-plugin_registry_init :: proc(registry: ^Plugin_Registry) -> bool {
+plugin_registry_init :: proc(registry: ^Plugin_Registry, allocator: mem.Allocator) -> bool {
     log.warn("plugin_registry_init() not implemented")
     return true
 }

@@ -64,7 +64,7 @@ module_is_active :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> bo
 	if !ok {
 		return false
 	}
-	return module.state == Module_State.Active
+	return module.state == Load_State.Active
 }
 // Returns module version. Requires module handle.
 module_version :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> Version {
@@ -110,6 +110,40 @@ module_has_capability :: proc(
 	return capability in module.api.identity.capabilities
 }
 
+// ============================================================================
+// EXTENSIONS
+// ============================================================================
+extension_find :: proc(registry: ^Extension_Registry, name: string) -> (ExtensionHandle, bool) {
+	if registry == nil || !registry.initialized do return INVALID_EXTENSION_HANDLE, false
+	if len(name) == 0 do return INVALID_EXTENSION_HANDLE, false
+
+	handle, found := registry.by_name[name]
+	if !found do return INVALID_EXTENSION_HANDLE, false
+	if !extension_is_valid(registry, handle) do return INVALID_EXTENSION_HANDLE, false
+	return handle, true
+}
+extension_is_loaded :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
+	extension, ok := extension_registry_get(registry, handle)
+	if !ok do return false
+
+	switch extension.state{
+		case .Loaded, .Registered, .Active: return true
+		case .Unloaded, .Failed: return false
+	}
+	return false
+}
+extension_is_active :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
+	extension, ok := extension_registry_get(registry, handle)
+	if !ok do return false
+
+	return extension.state == .Active
+}
+extension_version :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> Version {
+	extension, ok := extension_registry_get(registry, handle)
+	if !ok do return Version{}
+
+	return extension.api.identity.version
+}
 // ============================================================================
 // SERVICES
 // ============================================================================
