@@ -1,0 +1,7 @@
+name = "DAG"
+type = "Module"
+version = { major = 0, minor = 0, patch = 1 }
+author = "armscream"
+description = "Stub DAG scheduler — Directed Acyclic Graph task and systems scheduler, full impl pending."
+flags = ["Runtime"]
+capabilities = ["Custom"]

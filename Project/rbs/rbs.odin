@@ -1,13 +1,13 @@
 package build
 
-import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-import "../../Tools/rbs"
+import "../../Engine/src/Tools/rbs"
+import toml "../../Engine/src/ext/toml_parser"
 
 import "../../Engine/src/Core"
 
@@ -18,7 +18,7 @@ import "../../Engine/src/Core"
 //
 // The project configuration schema is owned by the engine
 // (Engine/src/Core/engine.odin). We import and reuse those types here so the
-// build system and runtime always agree on what project.json contains.
+// build system and runtime always agree on what project.toml contains.
 //
 
 
@@ -28,13 +28,9 @@ import "../../Engine/src/Core"
 //
 // IMPORTANT:
 //
-// rbs.odin lives here:
-//
-//     Project/rbs/rbs.odin
-//
-// Therefore all paths are relative to:
-//
-//     Project/rbs
+// rune.exe is launched from the Project/ directory, so all relative paths
+// below are resolved against Project/, not Project/rbs/ where this file
+// lives.
 //
 // Project layout:
 //
@@ -55,14 +51,14 @@ import "../../Engine/src/Core"
 //
 // ============================================================================
 
-PROJECT_CONFIG_PATH :: "config/project.json"
+PROJECT_CONFIG_PATH :: "config/project.toml"
 
-ENGINE_MODULES_PATH :: "../../Engine/src/Modules"
-PROJECT_MODULES_PATH :: "../modules"
+ENGINE_MODULES_PATH :: "../Engine/src/Modules"
+PROJECT_MODULES_PATH :: "modules"
 
-DEBUG_OUTPUT_PATH :: "../bin/Debug"
-EDITOR_OUTPUT_PATH :: "../bin/Editor"
-RELEASE_OUTPUT_PATH :: "../bin/Release"
+DEBUG_OUTPUT_PATH :: "bin/Debug"
+EDITOR_OUTPUT_PATH :: "bin/Editor"
+RELEASE_OUTPUT_PATH :: "bin/Release"
 
 ConfigState :: enum {
 	None, // none found, continue and lets the engine create one
@@ -162,12 +158,12 @@ load_project_config :: proc() -> Core.Project_Settings {
 	defer delete(data)
 
 	// ------------------------------------------------------------------------
-	// Parse JSON
+	// Parse TOML
 	// ------------------------------------------------------------------------
-	json_err := json.unmarshal(data, &config)
+	toml_err := toml.unmarshal(data, &config)
 
-	if json_err != nil {
-		log.error("Could not parse project configuration:\n  %s", json_err)
+	if toml_err != nil {
+		log.error("Could not parse project configuration:\n  %s", toml_err)
 		CONFIG_STATE = .Failed
 		return config
 	}
@@ -189,7 +185,7 @@ load_project_config :: proc() -> Core.Project_Settings {
 // CLEANUP PROJECT CONFIGURATION
 // ============================================================================
 //
-// Core.Project_Settings owns three [dynamic] arrays. JSON unmarshalling fills
+// Core.Project_Settings owns three [dynamic] arrays TOML unmarshalling fills
 // them with heap allocations that we own. Free them here.
 //
 cleanup_project_config :: proc(s: ^Core.Project_Settings) {
@@ -473,7 +469,7 @@ EDITOR_MODULE_NAME :: "Editor"
 //
 // Centralized gating policy for a (module, profile) pair.
 //
-//   - If the module is disabled in project.json, skip it.
+//   - If the module is disabled in project.toml, skip it.
 //   - If the module is the Editor and the profile is not the editor build,
 //     skip it. The Editor DLL only ships with the editor executable.
 //
@@ -571,7 +567,7 @@ copy_project_config :: proc(profile: rbs.Profile) {
 	fmt.println("Copying project configuration")
 	fmt.println("--------------------------------------------------")
 
-	err := rbs.copy(profile, "../config", "config")
+	err := rbs.copy(profile, "config", "config")
 
 	if err != nil {
 		fatal(
@@ -595,7 +591,7 @@ copy_project_scripts :: proc(profile: rbs.Profile) {
 	fmt.println("Copying project scripts")
 	fmt.println("--------------------------------------------------")
 
-	err := rbs.copy(profile, "../scripts", "scripts")
+	err := rbs.copy(profile, "scripts", "scripts")
 
 	if err != nil {
 		fatal(
@@ -619,7 +615,7 @@ copy_project_assets :: proc(profile: rbs.Profile) {
 	fmt.println("Copying project assets")
 	fmt.println("--------------------------------------------------")
 
-	err := rbs.copy(profile, "../assets", "assets")
+	err := rbs.copy(profile, "assets", "assets")
 
 	if err != nil {
 		fatal(
@@ -639,11 +635,32 @@ copy_project_assets :: proc(profile: rbs.Profile) {
 
 
 // ============================================================================
+// VERIFY MANIFESTS
+// ============================================================================
+//
+// Runs `rbs manifest codegen --check` semantics: every package on disk
+// must produce a <PackageName>.toml that matches what its IDENTITY/
+// DEPENDENCIES blocks declare. Fails the build if anything is stale or
+// missing.
+
+verify_manifests :: proc() {
+    if rbs.manifest_codegen_run_check() != 0 {
+        fatal(
+            "ERROR: Manifest check failed. Run `rune manifest` to regenerate, " +
+            "or fix the offending IDENTITY/DEPENDENCIES blocks before building.",
+        )
+    }
+}
+
+
+// ============================================================================
 // DEBUG PRE-BUILD
 // ============================================================================
 
 pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
+
+	verify_manifests()
 
 	build_modules(&project_config, profile)
 
@@ -666,6 +683,8 @@ pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
 
+	verify_manifests()
+
 	build_modules(&project_config, profile)
 
 	build_extensions(&project_config, profile)
@@ -686,6 +705,8 @@ pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 
 pre_build_release :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
+
+	verify_manifests()
 
 	build_modules(&project_config, profile)
 
@@ -798,11 +819,11 @@ main :: proc() {
 
 	switch CONFIG_STATE {
 	case .None:
-		log.warn("Starting engine without project.json..")
+		log.warn("Starting engine without project.toml..")
 		return
 	case .Failed:
 		log.error(
-			"Failed to load project configuration, please check your project.json file format.",
+			"Failed to load project configuration, please check your project.toml file format.",
 		)
 		log.destroy_console_logger(context.logger)
 		os.exit(1)
@@ -855,6 +876,24 @@ main :: proc() {
 	// ========================================================================
 	rbs.add_command(&ctx, "build", proc(ctx: rbs.Context, profile: rbs.Profile) {
 		rbs.exec_odin_cmd(ctx, rbs.Odin_Command.Build, profile)
+	})
+
+	// ========================================================================
+	// MANIFEST COMMAND
+	// ========================================================================
+	//
+	// `rbs manifest` walks Engine/src/Modules, Engine/src/Extensions, and
+	// Project/Plugins, extracts the IDENTITY/DEPENDENCIES/TARGETS blocks
+	// from each package's .odin source, and emits <PackageName>.toml next
+	// to the source.
+	//
+	// Usage:
+	//     rune manifest                       # generate everything
+	//     rune manifest Bifrost_Renderer      # one package, relative path
+	//     rune manifest --check               # exit 1 if any manifest is stale
+	//
+	rbs.add_command(&ctx, "manifest", proc(ctx: rbs.Context, profile: rbs.Profile) {
+		rbs.manifest_codegen_run(ctx, profile)
 	})
 
 	// ========================================================================

@@ -1,0 +1,62 @@
+project_name = "New Project"
+version = { major = 0, minor = 0, patch = 1 }
+
+[[modules]]
+name = "Bifrost_Renderer"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = true
+
+[[modules]]
+name = "DAG"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = true
+
+[[modules]]
+name = "ECS"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = true
+
+[[modules]]
+name = "Default_Input"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[modules]]
+name = "Miniaudio"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[modules]]
+name = "Box3D_Physics"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[modules]]
+name = "ATLAS-RMGUI"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[modules]]
+name = "Scripting"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[modules]]
+name = "Editor"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = true
+
+[[modules]]
+name = "ENet"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[extensions]]
+name = "Example Extension"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false
+
+[[plugins]]
+name = "Example Plugin"
+version = { major = 0, minor = 0, patch = 1 }
+enabled = false

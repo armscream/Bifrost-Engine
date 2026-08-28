@@ -10,6 +10,8 @@ Run rune.exe with
 ./rune run EDITOR - runs engine with "-vet -debug -define:RUN_EDITOR=true" and will also build the editor module
 ./rune run DEBUG - runs engine with "-vet -debug" - will not build the editor module
 ./rune run RELEASE - runs engine with "-vet -release" - will not build the editor module
+./rune manifest produces .toml manifest files for all components (modules/extensions/plugins)
+./rune manifest --check exits 1 on a stale manifest
 This will build all dependencies listed in project.json for the configuration you are running, as well as the executable into the bin directory. It also copies the assets, config, and scripts folders into the bin directory. It is recommended to only have .odin files directly under /Project.
 
 Plans: 
@@ -27,8 +29,9 @@ Module_Unload :: proc()
 Module_Update  :: proc(dt: f32)
 Module_Render  :: proc() // Optional, for renderers   
 
-Module = Engine capability/provider.
-Plugin = Project/Editor extension.
+Module = Core Engine capability/provider.
+Extension = Extends a Module.
+Plugin = Project/Editor feature provider.
 SDK = the stable public interface they use to communicate with Ymir, as well as for the programmer.
 
 Engine intent: 

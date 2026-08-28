@@ -50,6 +50,7 @@ Plugin_Context :: struct {
     //TODO: add more fields. This just makes this compile for now.
 }
 
+// TODO: implement all of these plugin lifecycle procs
 plugin_registry_init :: proc(registry: ^Plugin_Registry, allocator: mem.Allocator) -> bool {
     log.warn("plugin_registry_init() not implemented")
     return true
@@ -62,4 +63,29 @@ plugin_unload_all :: proc(registry: ^Plugin_Registry) -> bool {
 
 plugin_registry_destroy :: proc(registry: ^Plugin_Registry) {
     log.warn("plugin_registry_destroy() not implemented")
+}
+
+plugin_load_project_plugins :: proc(registry: ^Plugin_Registry) -> bool {
+    log.warn("plugin_load_project_plugins() not implemented")
+    return true
+}
+
+plugin_resolve_dependencies :: proc(registry: ^Plugin_Registry) -> bool {
+    log.warn("plugin_resolve_dependencies() not implemented")
+    return true
+}
+
+plugin_register_all :: proc(registry: ^Plugin_Registry) -> bool {
+    log.warn("plugin_register_all() not implemented")
+    return true
+}
+
+plugin_activate_all :: proc(registry: ^Plugin_Registry) -> bool {
+    log.warn("plugin_activate_all() not implemented")
+    return true
+}
+
+plugin_deactivate_all :: proc(registry: ^Plugin_Registry) -> bool {
+    log.warn("plugin_deactivate_all() not implemented")
+    return true
 }

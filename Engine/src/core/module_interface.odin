@@ -6,7 +6,127 @@ import "core:log"
 import "core:mem"
 
 // ============================================================================
-// MODULE ABI
+// SUPPORTED IDENTITY / DEPENDENCY LITERAL SUBSET (for rbs manifest codegen)
+// ============================================================================
+//
+// rbs manifest codegen scans the package's .odin source for the canonical
+// IDENTITY and DEPENDENCIES literals below and emits a deterministic
+// <PackageName>.toml manifest. The scanner only understands a strict, frozen
+// subset of Odin literal syntax. Anything outside this subset is rejected with
+// a precise error pointing at the offending line.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// IDENTITY block
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Marker comments are required and must wrap the literal exactly like this:
+//
+//     // === MODULE_IDENTITY (parsed by rbs) ===
+//     IDENTITY :: Core.Module_Identity{
+//         name        = "Bifrost_Renderer",
+//         version     = Core.Version{0, 1, 0},
+//         author      = "czvan",
+//         description = "PBR forward+ renderer.",
+//         type        = .Renderer,
+//         flags       = {.Runtime},
+//         capabilities = {.Renderer, .GPU, .Materials, .Textures},
+//     }
+//     // === END MODULE_IDENTITY ===
+//
+// Field rules (any unlisted shape is a parse error):
+//
+//   name        — Odin string literal "..."; no concatenation, no string ops.
+//   version     — Either `Core.Version{major, minor, patch}` or
+//                 `Core.Version{major = N, minor = N, patch = N}`.
+//                 Bare integer literals only. Expressions like `1 + 2` are not
+//                 allowed.
+//   author      — String literal.
+//   description — String literal. May be empty "" but must be present.
+//   type        — A single Odin enum identifier with the leading dot,
+//                 e.g. .Renderer, .Input, .ECS. The scanner does not resolve
+//                 the enum value; it only validates that the identifier is in
+//                 the known set of Module_Type members.
+//   flags       — A bit_set literal: `{.Runtime}` or `{.Editor_Only, .Runtime}`.
+//                 Members must be from Module_Flag.
+//   capabilities — Same shape as flags. Members must be from
+//                  Module_Capability.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// DEPENDENCIES block
+// ─────────────────────────────────────────────────────────────────────────
+//
+//     // === DEPENDENCIES (parsed by rbs) ===
+//     DEPENDENCIES := [?]Core.DLL_Dependency{
+//         {
+//             name        = "Default_Input",
+//             min_version = Core.Version{0, 0, 1},
+//             max_version = Core.Version{0, 0, 999},
+//             has_min_version = true,
+//             has_max_version = false,
+//             optional    = false,
+//         },
+//         ...more...
+//     }
+//     // === END DEPENDENCIES ===
+//
+// Array is `[?]Core.DLL_Dependency{ ... }` (pointer-style to match the ABI
+// layout used by Module_API.dependencies). Each element is a struct literal
+// in any field order, with these rules:
+//
+//   name            — String literal.
+//   min_version     — Core.Version{} literal.
+//   max_version     — Core.Version{} literal.
+//   has_min_version — `true` or `false` (bool literal).
+//   has_max_version — `true` or `false`.
+//   optional        — `true` or `false`.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// TARGETS block (extensions only; ignored for Modules and Plugins)
+// ─────────────────────────────────────────────────────────────────────────
+//
+//     // === TARGETS (parsed by rbs) ===
+//     TARGETS := [?]Core.Extension_Target{
+//         {
+//             module        = "Bifrost_Renderer",
+//             min_version   = Core.Version{0, 1, 0},
+//             max_version   = Core.Version{0, 0, 0},
+//             has_min_version = true,
+//             has_max_version = true,
+//         },
+//     }
+//     // === END TARGETS ===
+//
+// ─────────────────────────────────────────────────────────────────────────
+// GENERAL LITERAL RULES (apply to every block)
+// ─────────────────────────────────────────────────────────────────────────
+//
+//   - Comma separators are required between elements at the same nesting
+//     level. A trailing comma before a closing `}` or `]` is allowed.
+//   - Whitespace and newlines are arbitrary and ignored.
+//   - `//` and `/* */` comments inside blocks are stripped during scanning.
+//   - Qualified identifiers (`Core.Version`, etc.) are accepted but only the
+//     suffix is matched; the prefix may be `Core`, `core`, or omitted
+//     entirely.
+//   - String literals may contain `\\ \" \n \r \t` escapes; everything else is
+//     a parse error.
+//   - Integer literals may be decimal `0..9` or hex `0x..` with optional
+//     underscores between digits (e.g. `1_000_000`).
+//   - No function calls, no cast expressions, no arithmetic, no identifiers
+//     other than the documented ones.
+//
+// ANY drift from this subset produces an error of the form:
+//
+//     <relative-source-path>:<line>:<col>: unsupported literal in <block>: ...
+//
+// ─────────────────────────────────────────────────────────────────────────
+// Why these restrictions matter
+// ─────────────────────────────────────────────────────────────────────────
+//
+// rbs codegen is what guarantees the on-disk manifest matches the source.
+// Anything rbs cannot parse is, by definition, also anything rbs cannot
+// verify. Keeping the supported subset small and explicit removes ambiguity
+// from the build pipeline and makes failed codegen failures informative
+// instead of silent drift.
 // ============================================================================
 //
 // Every Ymir engine module is a dynamically loaded provider of engine
@@ -918,4 +1038,109 @@ module_collect_by_type :: proc(registry: ^Module_Registry, module_type: Module_T
 		if module_is_valid(registry, handle) {append(&result, handle)}
 	}
 	return result
+}
+
+// ======================
+// Module Library Loading
+//
+// Module Lib
+// Runtime representation of a module loaded from a DLL.
+//
+// Module_Loader is responsible for the DLL boundary.
+// Module_Registry remains responsible for module identity, handles,
+// dependencies, and registration state.
+
+Module_Lib :: struct {
+	lib: Loaded_Lib,
+	handle: ModuleHandle,
+}
+
+Module_Runtime :: struct {
+	handle: ModuleHandle,
+	Library: Loaded_Lib,
+	ctx: Core_Lib_Context,
+}
+
+module_lib_load :: proc(module: ^Module_Lib, path: string, ctx: ^Lib_Context) -> bool {
+	if module == nil || ctx == nil do return false
+	// already loaded.
+	if module.lib.state != .Unloaded do return false
+
+	// load the physical library and execute it's load callback.
+	if !loaded_lib_load(&module.lib, ctx, path) {
+		log.error("[Module] Failed to load library:", path)
+		return false
+	}
+
+	// Obtain the API descriptor.
+	descriptor := loaded_lib_get_descriptor(&module.lib)
+	if descriptor == nil {
+		log.error("[Module] Has no descriptor:", path)
+		loaded_lib_shutdown(&module.lib, ctx)
+		return false
+	}
+
+	// This Lib must actually identify itself as a module.
+	if descriptor.lib_type != .Module {
+		log.error("[Module] Is not a module:", path)
+		loaded_lib_shutdown(&module.lib, ctx)
+		return false
+	}
+
+	log.info("[Module] Loaded:", path)
+	return true
+}
+
+module_lib_register :: proc(module: ^Module_Lib, ctx: ^Lib_Context) -> bool {
+	if module == nil || ctx == nil do return false
+	if module.lib.state != .Loaded do return false
+	if !loaded_lib_register(&module.lib, ctx) {
+		log.error("[Module] Registration failed")
+		loaded_lib_shutdown(&module.lib, ctx)
+		return false
+	}
+	return true
+}
+
+module_lib_activate :: proc(module: ^Module_Lib, ctx: ^Lib_Context) -> bool {
+	if module == nil || ctx == nil do return false
+	if module.lib.state != .Registered do return false
+	if !loaded_lib_activate(&module.lib, ctx) {
+		log.error("[Module] Activation failed")
+		return false
+	}
+	return true
+}
+
+module_lib_deactivate :: proc(module: ^Module_Lib, ctx: ^Lib_Context) -> bool {
+	if module == nil || ctx == nil do return false
+	return loaded_lib_deactivate(&module.lib, ctx)
+}
+
+module_lib_unload :: proc(module: ^Module_Lib, ctx: ^Lib_Context) -> bool {
+	if module == nil || ctx == nil do return false
+	if module.lib.state == .Active do return false
+	ok := loaded_lib_unload(&module.lib, ctx)
+	if !ok {module.handle = ModuleHandle{}}
+	return ok
+}
+
+module_lib_shutdown :: proc(module: ^Module_Lib, ctx: ^Lib_Context) {
+	if module == nil || ctx == nil do return
+	loaded_lib_shutdown(&module.lib, ctx)
+	module.handle = ModuleHandle{}
+}
+
+// Accessors
+module_lib_get_api :: proc(module: ^Module_Lib) -> ^LIB_API {
+	if module == nil do return nil
+	return loaded_lib_get_api(&module.lib)
+}
+module_lib_get_descriptor :: proc(module: ^Module_Lib) -> ^Lib_Descriptor {	
+	if module == nil do return nil
+	return loaded_lib_get_descriptor(&module.lib)
+}
+module_lib_is_active :: proc(module: ^Module_Lib) -> bool {
+	if module == nil do return false
+	return loaded_lib_is_active(&module.lib)
 }
