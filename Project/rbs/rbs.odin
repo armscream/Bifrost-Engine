@@ -15,20 +15,11 @@ import "../../Engine/src/Core"
 // ============================================================================
 // PROJECT CONFIGURATION
 // ============================================================================
-
-Project_Config :: struct {
-	project_name:  string,
-	version:       string,
-	renderer_dll:  string,
-	input_dll:     string,
-	ecs_dll:       string,
-	audio_dll:     string,
-	physics_dll:   string,
-	ui_dll:        string,
-	editor_dll:    string,
-	plugins:       []string,
-	other_modules: []string,
-}
+//
+// The project configuration schema is owned by the engine
+// (Engine/src/Core/engine.odin). We import and reuse those types here so the
+// build system and runtime always agree on what project.json contains.
+//
 
 
 // ============================================================================
@@ -88,7 +79,7 @@ CONFIG_STATE := ConfigState.None
 // The project configuration is therefore loaded once and kept here for the
 // duration of the RBS process.
 //
-project_config: Project_Config
+project_config: Core.Project_Settings
 
 
 // ============================================================================
@@ -144,7 +135,7 @@ command_path :: proc(path: string) -> string {
 // ============================================================================
 // LOAD PROJECT CONFIGURATION
 // ============================================================================
-load_project_config :: proc() -> Project_Config {
+load_project_config :: proc() -> Core.Project_Settings {
 	fmt.println("")
 	fmt.println("--------------------------------------------------")
 	fmt.println("Loading project configuration")
@@ -153,14 +144,14 @@ load_project_config :: proc() -> Project_Config {
 	if !os.exists(PROJECT_CONFIG_PATH) {
 		log.error("Project configuration was not found:\n  %s", PROJECT_CONFIG_PATH)
 		CONFIG_STATE = .None
-		return Project_Config{}
+		return Core.Project_Settings{}
 	}
 
 	// ------------------------------------------------------------------------
 	// Read file
 	// ------------------------------------------------------------------------
 	data, read_err := os.read_entire_file(PROJECT_CONFIG_PATH, context.allocator)
-	config: Project_Config
+	config: Core.Project_Settings
 
 	if read_err != nil {
 		log.error("Could not read project configuration:\n  %s", read_err)
@@ -183,9 +174,28 @@ load_project_config :: proc() -> Project_Config {
 
 	fmt.printfln("  Project: %s", config.project_name)
 
-	fmt.printfln("  Version: %s", config.version)
+	fmt.printfln(
+		"  Version: v%d.%d.%d",
+		config.major,
+		config.minor,
+		config.patch,
+	)
 	CONFIG_STATE = .Loaded
 	return config
+}
+
+
+// ============================================================================
+// CLEANUP PROJECT CONFIGURATION
+// ============================================================================
+//
+// Core.Project_Settings owns three [dynamic] arrays. JSON unmarshalling fills
+// them with heap allocations that we own. Free them here.
+//
+cleanup_project_config :: proc(s: ^Core.Project_Settings) {
+	delete(s.modules)
+	delete(s.extensions)
+	delete(s.plugins)
 }
 
 
@@ -448,33 +458,73 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 
 
 // ============================================================================
-// BUILD CORE MODULES
+// EDITOR MODULE NAME
 // ============================================================================
-build_core_modules :: proc(config: Project_Config, profile: rbs.Profile) {
+//
+// The Editor entry lives in settings.modules. A single constant lets us filter
+// it consistently for non-editor profiles.
+//
+EDITOR_MODULE_NAME :: "Editor"
+
+
+// ============================================================================
+// SHOULD BUILD MODULE
+// ============================================================================
+//
+// Centralized gating policy for a (module, profile) pair.
+//
+//   - If the module is disabled in project.json, skip it.
+//   - If the module is the Editor and the profile is not the editor build,
+//     skip it. The Editor DLL only ships with the editor executable.
+//
+should_build_module :: proc(name: string, enabled: bool, profile_name: string) -> bool {
+	if !enabled do return false
+	if name == EDITOR_MODULE_NAME && profile_name != "Project-Editor" do return false
+	return true
+}
+
+
+// ============================================================================
+// BUILD MODULES
+// ============================================================================
+build_modules :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
 	fmt.println("")
 	fmt.println("==================================================")
-	fmt.println(" CORE ENGINE MODULES")
+	fmt.println(" ENGINE MODULES")
 	fmt.println("==================================================")
 
-	build_module(config.renderer_dll, profile)
+	for m in settings.modules {
+		if !should_build_module(m.name, m.enabled, profile.name) do continue
+		build_module(m.name, profile)
+	}
+}
 
-	build_module(config.input_dll, profile)
 
-	build_module(config.ecs_dll, profile)
+// ============================================================================
+// BUILD EXTENSIONS
+// ============================================================================
+build_extensions :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
+	if len(settings.extensions) == 0 {
+		return
+	}
 
-	build_module(config.audio_dll, profile)
+	fmt.println("")
+	fmt.println("==================================================")
+	fmt.println(" EXTENSIONS")
+	fmt.println("==================================================")
 
-	build_module(config.physics_dll, profile)
-
-	build_module(config.ui_dll, profile)
+	for e in settings.extensions {
+		if !e.enabled do continue
+		build_module(e.name, profile)
+	}
 }
 
 
 // ============================================================================
 // BUILD PLUGINS
 // ============================================================================
-build_plugins :: proc(config: Project_Config, profile: rbs.Profile) {
-	if len(config.plugins) == 0 {
+build_plugins :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
+	if len(settings.plugins) == 0 {
 		return
 	}
 
@@ -483,45 +533,10 @@ build_plugins :: proc(config: Project_Config, profile: rbs.Profile) {
 	fmt.println(" PLUGINS")
 	fmt.println("==================================================")
 
-	for plugin in config.plugins {
-		build_module(plugin, profile)
+	for p in settings.plugins {
+		if !p.enabled do continue
+		build_module(p.name, profile)
 	}
-}
-
-
-// ============================================================================
-// BUILD OTHER MODULES
-// ============================================================================
-build_other_modules :: proc(config: Project_Config, profile: rbs.Profile) {
-	if len(config.other_modules) == 0 {
-		return
-	}
-
-	fmt.println("")
-	fmt.println("==================================================")
-	fmt.println(" OTHER MODULES")
-	fmt.println("==================================================")
-
-	for module in config.other_modules {
-		build_module(module, profile)
-	}
-}
-
-
-// ============================================================================
-// BUILD EDITOR MODULE
-// ============================================================================
-build_editor_module :: proc(config: Project_Config, profile: rbs.Profile) {
-	if config.editor_dll == "" {
-		return
-	}
-
-	fmt.println("")
-	fmt.println("==================================================")
-	fmt.println(" EDITOR MODULE")
-	fmt.println("==================================================")
-
-	build_module(config.editor_dll, profile)
 }
 
 
@@ -630,11 +645,11 @@ copy_project_assets :: proc(profile: rbs.Profile) {
 pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
 
-	build_core_modules(project_config, profile)
+	build_modules(&project_config, profile)
 
-	build_plugins(project_config, profile)
+	build_extensions(&project_config, profile)
 
-	build_other_modules(project_config, profile)
+	build_plugins(&project_config, profile)
 
 	copy_project_config(profile)
 
@@ -651,15 +666,11 @@ pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
 
-	build_core_modules(project_config, profile)
+	build_modules(&project_config, profile)
 
-	build_plugins(project_config, profile)
+	build_extensions(&project_config, profile)
 
-	build_other_modules(project_config, profile)
-
-	// Editor DLL is only built for EDITOR.
-
-	build_editor_module(project_config, profile)
+	build_plugins(&project_config, profile)
 
 	copy_project_config(profile)
 
@@ -676,11 +687,11 @@ pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 pre_build_release :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
 
-	build_core_modules(project_config, profile)
+	build_modules(&project_config, profile)
 
-	build_plugins(project_config, profile)
+	build_extensions(&project_config, profile)
 
-	build_other_modules(project_config, profile)
+	build_plugins(&project_config, profile)
 
 	copy_project_config(profile)
 
@@ -727,6 +738,10 @@ main :: proc() {
 	// Load project configuration
 	// ------------------------------------------------------------------------
 	project_config = load_project_config()
+
+	// Free the dynamic arrays owned by Core.Project_Settings at exit. Safe to
+	// call on the zero-value returned by the .None / failed-read paths.
+	defer cleanup_project_config(&project_config)
 
 	// ========================================================================
 	// DEBUG PROFILE
@@ -804,13 +819,16 @@ main :: proc() {
 
 		fmt.printfln(" Project: %s", project_config.project_name)
 
-		fmt.printfln(" Version: %s", project_config.version)
+		fmt.printfln(
+			" Version: v%d.%d.%d",
+			project_config.major,
+			project_config.minor,
+			project_config.patch,
+		)
 
 		fmt.printfln(" Config:  %s", PROJECT_CONFIG_PATH)
 
 		fmt.println("==================================================")
-
-		return
 	}
 
 	// ========================================================================

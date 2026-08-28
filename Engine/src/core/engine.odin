@@ -109,17 +109,19 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 	if !extension_register_all(&GLOBAL_EXTENSION_REGISTRY, &GLOBAL_MODULE_REGISTRY) do return false
 
 	// Load Plugins
-	if !plugin_load_project_plugins() do return false
-	if !plugin_resolve_dependencies(&GLOBAL_PLUGIN_REGISTRY) do return false
-	if !plugin_register_all(&GLOBAL_PLUGIN_REGISTRY) do return false
+	// TODO: complete these
+	//if !plugin_load_project_plugins() do return false
+	//if !plugin_resolve_dependencies(&GLOBAL_PLUGIN_REGISTRY) do return false
+	//if !plugin_register_all(&GLOBAL_PLUGIN_REGISTRY) do return false
 
 	// Build engine scheduling after all systems have registered
 	if !scheduler_build() do return false
 
 	// ACTIVATION
 	if !module_activate_all(&GLOBAL_MODULE_REGISTRY) do return false
-	if !extension_activate_all(&GLOBAL_EXTENSION_REGISTRY) do return false
-	if !plugin_activate_all(&GLOBAL_PLUGIN_REGISTRY) do return false
+	// TODO: complete these
+	//if !extension_activate_all(&GLOBAL_EXTENSION_REGISTRY) do return false
+	//if !plugin_activate_all(&GLOBAL_PLUGIN_REGISTRY) do return false
 
 	fmt.println("")
 	fmt.println("Engine initialization complete.")
@@ -156,7 +158,8 @@ destroy :: proc() -> bool {
 	fmt.println("========================================")
 
 	// DEACTIVATE
-	plugin_deactivate_all(&GLOBAL_PLUGIN_REGISTRY)
+	// TODO:
+	//plugin_deactivate_all(&GLOBAL_PLUGIN_REGISTRY)
 	extension_deactivate_all(&GLOBAL_EXTENSION_REGISTRY)
 	// Stop modules while their runtime dependencies still exist.
 	module_deactivate_all(&GLOBAL_MODULE_REGISTRY)
