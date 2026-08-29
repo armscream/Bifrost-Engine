@@ -1,0 +1,15 @@
+name = "Miniaudio"
+type = "Module"
+version = { major = 0, minor = 0, patch = 1 }
+author = "armscream"
+description = "Stub miniaudio module — full impl pending."
+flags = ["Runtime"]
+capabilities = ["Audio"]
+
+[[dependencies]]
+name = "DAG"
+min_version = { major = 0, minor = 0, patch = 1 }
+max_version = { major = 0, minor = 0, patch = 999 }
+has_min_version = true
+has_max_version = false
+optional = false

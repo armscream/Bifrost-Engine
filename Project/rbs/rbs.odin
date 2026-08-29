@@ -28,9 +28,10 @@ import "../../Engine/src/Core"
 //
 // IMPORTANT:
 //
-// rune.exe is launched from the Project/ directory, so all relative paths
-// below are resolved against Project/, not Project/rbs/ where this file
-// lives.
+// rune.exe lives at the project root and chdirs into it at startup (see
+// main()). After that, all relative paths below are anchored to the project
+// root, so this code is correct no matter what the project folder is called
+// or where the user invoked rune from.
 //
 // Project layout:
 //
@@ -51,14 +52,14 @@ import "../../Engine/src/Core"
 //
 // ============================================================================
 
-PROJECT_CONFIG_PATH :: "config/project.toml"
+PROJECT_CONFIG_PATH :: "../config/project.toml"
 
-ENGINE_MODULES_PATH :: "../Engine/src/Modules"
-PROJECT_MODULES_PATH :: "modules"
+ENGINE_MODULES_PATH :: "../../Engine/src/Modules"
+PROJECT_MODULES_PATH :: "../modules"
 
-DEBUG_OUTPUT_PATH :: "bin/Debug"
-EDITOR_OUTPUT_PATH :: "bin/Editor"
-RELEASE_OUTPUT_PATH :: "bin/Release"
+DEBUG_OUTPUT_PATH :: "../bin/Debug"
+EDITOR_OUTPUT_PATH :: "../bin/Editor"
+RELEASE_OUTPUT_PATH :: "../bin/Release"
 
 ConfigState :: enum {
 	None, // none found, continue and lets the engine create one
@@ -567,7 +568,7 @@ copy_project_config :: proc(profile: rbs.Profile) {
 	fmt.println("Copying project configuration")
 	fmt.println("--------------------------------------------------")
 
-	err := rbs.copy(profile, "config", "config")
+	err := rbs.copy(profile, "../config", "config")
 
 	if err != nil {
 		fatal(
@@ -591,7 +592,7 @@ copy_project_scripts :: proc(profile: rbs.Profile) {
 	fmt.println("Copying project scripts")
 	fmt.println("--------------------------------------------------")
 
-	err := rbs.copy(profile, "scripts", "scripts")
+	err := rbs.copy(profile, "../scripts", "scripts")
 
 	if err != nil {
 		fatal(
@@ -615,7 +616,7 @@ copy_project_assets :: proc(profile: rbs.Profile) {
 	fmt.println("Copying project assets")
 	fmt.println("--------------------------------------------------")
 
-	err := rbs.copy(profile, "assets", "assets")
+	err := rbs.copy(profile, "../assets", "assets")
 
 	if err != nil {
 		fatal(
@@ -749,6 +750,38 @@ pre_build :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 
 main :: proc() {
 	context.logger = log.create_console_logger()
+
+	// ------------------------------------------------------------------------
+	// PROJECT ROOT
+	// ------------------------------------------------------------------------
+	//
+	// rune.exe always lives at the root of the project directory, alongside
+	// rbs/, config/, modules/, etc. All relative paths in this file are
+	// written from the rbs/ subdirectory (so `../` is the project root and
+	// `../../` is the engine root). Resolve the executable directory and
+	// chdir into <project_root>/rbs/ so those paths stay valid regardless of
+	// the project's folder name or where the user invoked rune from.
+	//
+	exe_dir, exe_err := os.get_executable_directory(context.allocator)
+	if exe_err == nil {
+		build_dir, join_err := filepath.join({exe_dir, "rbs"}, context.allocator)
+		delete(exe_dir)
+		if join_err == nil {
+			if chdir_err := os.chdir(build_dir); chdir_err != nil {
+				log.warnf(
+					"Could not chdir to project build directory (%s): %s",
+					build_dir,
+					chdir_err,
+				)
+			}
+			delete(build_dir)
+		} else {
+			log.warnf("Could not resolve build directory path: %s", join_err)
+		}
+	} else {
+		log.warnf("Could not determine executable directory: %s", exe_err)
+	}
+
 	// ------------------------------------------------------------------------
 	// RBS context
 	// ------------------------------------------------------------------------
