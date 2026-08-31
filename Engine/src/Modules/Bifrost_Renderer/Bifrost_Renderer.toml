@@ -1,15 +1,18 @@
+api_version = 1
 name = "Bifrost_Renderer"
-type = "Module"
+component_kind = "Module"
+type = "Renderer"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
 description = "PBR forward+ renderer with Vulkan and MoltenVK backends."
 flags = ["Runtime"]
 capabilities = ["Renderer", "GPU", "Materials", "Textures"]
+dependency_count = 1
 
 [[dependencies]]
-name = ""
-min_version = { major = 0, minor = 0, patch = 0 }
-max_version = { major = 0, minor = 0, patch = 0 }
-has_min_version = false
-has_max_version = false
+name = "DAG"
+min_version = { major = 0, minor = 0, patch = 1 }
+max_version = { major = 9, minor = 9, patch = 9 }
+has_min_version = true
+has_max_version = true
 optional = false

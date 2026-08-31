@@ -5,21 +5,20 @@ import "core:log"
 import "../../Core"
 
 // === MODULE_IDENTITY (parsed by rbs) ===
-IDENTITY :: Core.Module_Identity{
-    name        = "SDL3_Renderer",
-    version     = Core.Version{0, 0, 1},
-    author      = "armscream",
-    description = "SDL3 GPU renderer.",
-    type        = .Renderer,
-    flags       = {.Runtime},
-    capabilities = {.Renderer, .GPU, .Materials, .Textures},
+IDENTITY :: Core.Lib_Descriptor {
+	api_version    = Core.LIB_API_VERSION,
+	name           = "SDL3_GPU",
+	version        = Core.Version{0, 0, 1},
+	author         = "armscream",
+	description    = "stubbed SDL3_GPU module",
+	component_kind = .Module,
+	type           = .Renderer,
+	flags          = {.Runtime},
+	capabilities   = {.Renderer, .GPU, .Materials, .Textures},
+    dependencies   = {},
+    dependency_count = 0,
 }
 // === END MODULE_IDENTITY ===
-
-// === DEPENDENCIES (parsed by rbs) ===
-DEPENDENCIES := [?]Core.DLL_Dependency{
-}
-// === END DEPENDENCIES ===
 
 module_load :: proc() -> bool {
     log.info("Renderer module loaded")

@@ -1,5 +1,11 @@
-// Engine/src/Modules/Bifrost_Renderer/mod.odin
-package Bifrost_Renderer
+// Engine/src/Modules/BF_Editor/mod.odin
+//
+// Stub module — full implementation is being migrated from the previous
+// engine. This file exists so rbs manifest codegen has a parseable
+// IDENTITY/DEPENDENCIES block and the loader sees a real module at
+// <Name>.odin convention.
+
+package BF_Editor
 
 import "core:log"
 import "../../Core"
@@ -7,16 +13,16 @@ import "../../Core"
 // === MODULE_IDENTITY (parsed by rbs) ===
 IDENTITY :: Core.Lib_Descriptor {
 	api_version    = Core.LIB_API_VERSION,
-	name           = "Bifrost_Renderer",
+	name           = "BF_Editor",
 	version        = Core.Version{0, 0, 1},
 	author         = "armscream",
-	description    = "PBR forward+ renderer with Vulkan and MoltenVK backends.",
+	description    = "Stub Editor module.",
 	component_kind = .Module,
-	type           = .Renderer,
-	flags          = {.Runtime},
-	capabilities   = {.Renderer, .GPU, .Materials, .Textures},
+	type           = .Editor,
+	flags          = {.Editor_Only},
+	capabilities   = {.Editor},
 	dependencies   = {{
-		name            = "DAG",
+		name            = "BF_DAG",
 		min_version     = Core.Version{0, 0, 1},
 		max_version     = Core.Version{9, 9, 9},
 		has_max_version = true,
@@ -43,7 +49,7 @@ bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
 
 module_load :: proc(ctx: ^Core.Lib_Context) -> bool {
 	_ = ctx
-	log.info("Renderer module loaded")
+	log.warn("[EDITOR] stub module loaded — implementation pending")
 	return true
 }
 module_register :: proc(ctx: ^Core.Lib_Context) -> bool {
@@ -59,5 +65,5 @@ module_deactivate :: proc(ctx: ^Core.Lib_Context) {
 }
 module_unload :: proc(ctx: ^Core.Lib_Context) {
 	_ = ctx
-	log.info("Renderer module unloaded")
+	log.warn("[EDITOR] stub module unloaded")
 }

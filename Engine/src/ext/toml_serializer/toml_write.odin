@@ -80,13 +80,25 @@ doc_add_string_array :: proc(d: ^Document, key: string, values: []string) {
 //     })
 
 doc_add_inline_table :: proc(
-    d: ^Document, key: string,
-    populate: proc(it: ^Inline_Table),
+	d: ^Document, key: string,
+	populate: proc(it: ^Inline_Table),
 ) {
-    it: Inline_Table
-    inline_table_init(&it)
-    populate(&it)
-    append(&d.entries, Key_Value{key = key, value = it})
+	it: Inline_Table
+	inline_table_init(&it)
+	populate(&it)
+	append(&d.entries, Key_Value{key = key, value = it})
+}
+
+// it_add_inline_table appends a nested inline table (key = nested_table)
+// to an existing Inline_Table. Mirrors doc_add_inline_table for nested use.
+it_add_inline_table :: proc(
+	it: ^Inline_Table, key: string,
+	populate: proc(inner: ^Inline_Table),
+) {
+	inner: Inline_Table
+	inline_table_init(&inner)
+	populate(&inner)
+	append(it, Key_Value{key = key, value = inner})
 }
 
 doc_add_array_of_tables :: proc(
@@ -197,19 +209,32 @@ write_kv :: proc(w: ^Writer, kv: ^Key_Value) {
 
 @(private)
 _write_value :: proc(w: ^Writer, v: Value) {
-    switch &x in v {
-    case string:
+    // Direct case-dispatch on the anonymous Value union trips a spurious
+    // exhaustiveness error in this Odin version when the union is
+    // self-referential (Array -> Value -> Array). Use type-assert helpers
+    // instead — equivalent runtime cost, no false-positive diagnostics.
+    if is_value_string(v) {
+        s, _ := v.(string)
         _emit(w, "\"")
-        _write_escaped(w, x)
+        _write_escaped(w, s)
         _emit(w, "\"")
-    case int:
-        _emit(w, fmt.tprintf("%d", x))
-    case bool:
-        _emit(w, x ? "true" : "false")
-    case Inline_Table:
-        _write_inline_table(w, &x)
-    case Array:
-        _write_array(w, &x)
+        return
+    }
+    if i, ok := v.(int); ok {
+        _emit(w, fmt.tprintf("%d", i))
+        return
+    }
+    if b, ok := v.(bool); ok {
+        _emit(w, b ? "true" : "false")
+        return
+    }
+    if it, ok := v.(Inline_Table); ok {
+        _write_inline_table(w, &it)
+        return
+    }
+    if a, ok := v.(Array); ok {
+        _write_array(w, &a)
+        return
     }
 }
 

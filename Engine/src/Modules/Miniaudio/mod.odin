@@ -11,29 +11,29 @@ import "core:log"
 import "../../Core"
 
 // === MODULE_IDENTITY (parsed by rbs) ===
-IDENTITY :: Core.Module_Identity{
-    name        = "Miniaudio",
-    version     = Core.Version{0, 0, 1},
-    author      = "armscream",
-    description = "Stub miniaudio module — full impl pending.",
-    type        = .Other,
-    flags       = {.Runtime},
-    capabilities = {.Audio},
+IDENTITY :: Core.Lib_Descriptor {
+	api_version      = Core.LIB_API_VERSION,
+	name             = "Miniaudio",
+	version          = Core.Version{0, 0, 1},
+	author           = "armscream",
+	description      = "Stub miniaudio module — full impl pending.",
+	component_kind   = .Module,
+	type             = .Audio,
+	flags            = {.Runtime},
+	capabilities     = {.Audio},
+	dependencies     = {
+		{
+			name = "BF_DAG",
+			min_version = Core.Version{0, 0, 1},
+			max_version = Core.Version{9, 9, 9},
+			has_max_version = true,
+			has_min_version = true,
+			optional = false,
+		},
+	},
+	dependency_count = 1,
 }
 // === END MODULE_IDENTITY ===
-
-// === DEPENDENCIES (parsed by rbs) ===
-DEPENDENCIES := [?]Core.DLL_Dependency{
-    {
-        name        = "DAG",
-        min_version = Core.Version{0, 0, 1},
-        max_version = Core.Version{0, 0, 999},
-        has_min_version = true,
-        has_max_version = false,
-        optional    = false,
-    },
-}
-// === END DEPENDENCIES ===
 
 module_load :: proc() -> bool {
     log.warn("[MINIAUDIO] stub module loaded — implementation pending")

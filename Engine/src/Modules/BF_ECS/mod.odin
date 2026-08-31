@@ -1,5 +1,11 @@
-// Engine/src/Modules/Bifrost_Renderer/mod.odin
-package Bifrost_Renderer
+// Engine/src/Modules/BF_ECS/mod.odin
+//
+// Stub module — full implementation is being migrated from the previous
+// engine. This file exists so rbs manifest codegen has a parseable
+// IDENTITY/DEPENDENCIES block and the loader sees a real module at
+// <Name>.odin convention.
+
+package BF_ECS
 
 import "core:log"
 import "../../Core"
@@ -7,14 +13,14 @@ import "../../Core"
 // === MODULE_IDENTITY (parsed by rbs) ===
 IDENTITY :: Core.Lib_Descriptor {
 	api_version    = Core.LIB_API_VERSION,
-	name           = "Bifrost_Renderer",
+	name           = "ECS",
 	version        = Core.Version{0, 0, 1},
 	author         = "armscream",
-	description    = "PBR forward+ renderer with Vulkan and MoltenVK backends.",
+	description    = "Stub ECS module — non-archetypal entity component system, full impl pending.",
 	component_kind = .Module,
-	type           = .Renderer,
+	type           = .Other,
 	flags          = {.Runtime},
-	capabilities   = {.Renderer, .GPU, .Materials, .Textures},
+	capabilities   = {.ECS},
 	dependencies   = {{
 		name            = "DAG",
 		min_version     = Core.Version{0, 0, 1},
@@ -43,7 +49,7 @@ bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
 
 module_load :: proc(ctx: ^Core.Lib_Context) -> bool {
 	_ = ctx
-	log.info("Renderer module loaded")
+	log.warn("[ECS] stub module loaded — implementation pending")
 	return true
 }
 module_register :: proc(ctx: ^Core.Lib_Context) -> bool {
@@ -59,5 +65,5 @@ module_deactivate :: proc(ctx: ^Core.Lib_Context) {
 }
 module_unload :: proc(ctx: ^Core.Lib_Context) {
 	_ = ctx
-	log.info("Renderer module unloaded")
+	log.warn("[ECS] stub module unloaded")
 }

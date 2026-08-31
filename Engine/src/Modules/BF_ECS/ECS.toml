@@ -1,15 +1,18 @@
+api_version = 1
 name = "ECS"
-type = "Module"
+component_kind = "Module"
+type = "Other"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
 description = "Stub ECS module — non-archetypal entity component system, full impl pending."
 flags = ["Runtime"]
 capabilities = ["ECS"]
+dependency_count = 1
 
 [[dependencies]]
 name = "DAG"
 min_version = { major = 0, minor = 0, patch = 1 }
-max_version = { major = 0, minor = 0, patch = 999 }
+max_version = { major = 9, minor = 9, patch = 9 }
 has_min_version = true
-has_max_version = false
+has_max_version = true
 optional = false

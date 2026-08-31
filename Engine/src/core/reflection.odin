@@ -1,64 +1,101 @@
 // Engine\src\Core\reflection.odin
 package Core
 
-MODULE_INDEX_INVALID :: u32(0)
-MODULE_GENERATION_INVALID :: u32(0)
+// ============================================================================
+// FOUNDATIONAL TYPES
+// ============================================================================
+//
+// Handle types and the Version triple used everywhere in Core.
+//
+// Handle layout matches `core:container/handle_map`'s expectations:
+//   - field names: `idx`, `gen` (both u32 for Handle32-equivalent)
+//   - idx == 0 is the reserved invalid slot
+//   - gen == 0 is reserved as the "freed" sentinel inside the handle map
+//
+// We use 32-bit indices to leave room for the realistic number of components
+// Bifrost will ever load; widening to Handle64 only requires changing the
+// underlying integer type and the index mask in helpers that read it.
+//
+// Version is the only numeric triple carried through the public ABI; it is
+// intentionally minimal (major/minor/patch u32) so it round-trips through
+// C-compatible layouts without alignment surprises.
+// ============================================================================
+
+Version :: struct {
+	major: u32,
+	minor: u32,
+	patch: u32,
+}
+
+// BASEVERSION is the default 0.0.1 used when a project/module does not
+// declare one explicitly.
+@(private)
+BASEVERSION: Version = {
+	major = 0,
+	minor = 0,
+	patch = 1,
+}
+
+// ============================================================================
+// HANDLES
+// ============================================================================
+
 ModuleHandle :: struct {
-	index:      u32,
-	generation: u32,
-}
-INVALID_MODULE_HANDLE :: ModuleHandle { // Real modules start at 1, if ModuleHandle.index == 0, then it's invalid
-	index      = MODULE_INDEX_INVALID,
-	generation = MODULE_GENERATION_INVALID,
+	idx: u32,
+	gen: u32,
 }
 
-EXTENSION_INDEX_INVALID :: u32(0)
-EXTENSION_GENERATION_INVALID :: u32(0)
+INVALID_MODULE_HANDLE :: ModuleHandle {
+	idx = 0,
+	gen = 0,
+}
+
 ExtensionHandle :: struct {
-	index:      u32,
-	generation: u32,
+	idx: u32,
+	gen: u32,
 }
+
 INVALID_EXTENSION_HANDLE :: ExtensionHandle {
-    index      = EXTENSION_INDEX_INVALID,
-    generation = EXTENSION_GENERATION_INVALID,
+	idx = 0,
+	gen = 0,
 }
 
-PLUGIN_INDEX_INVALID :: u32(0)
-PLUGIN_GENERATION_INVALID :: u32(0)
 PluginHandle :: struct {
-	index:      u32,
-	generation: u32,
+	idx: u32,
+	gen: u32,
 }
+
 INVALID_PLUGIN_HANDLE :: PluginHandle {
-    index      = PLUGIN_INDEX_INVALID,
-    generation = PLUGIN_GENERATION_INVALID,
+	idx = 0,
+	gen = 0,
 }
 
-SERVICE_INDEX_INVALID :: u32(0)
-SERVICE_GENERATION_INVALID :: u32(0)
 ServiceHandle :: struct {
-	index:      u32,
-	generation: u32,
+	idx: u32,
+	gen: u32,
 }
+
 INVALID_SERVICE_HANDLE :: ServiceHandle {
-    index      = SERVICE_INDEX_INVALID,
-    generation = SERVICE_GENERATION_INVALID,
+	idx = 0,
+	gen = 0,
 }
 
-DLL_Identity :: struct {
-	name:         cstring,
-	version:      Version,
-	author:       cstring,
-	description:  cstring,
-	type:         Module_Type,
-	flags:        Module_Flags,
+ResourceHandle :: struct {
+	idx: u32,
+	gen: u32,
 }
 
-DLL_Dependency :: struct {
-	name:            cstring,
-	min_version:     Version,
-	max_version:     Version,
-	has_min_version: bool,
-	has_max_version: bool,
-	optional:        bool,
+INVALID_RESOURCE_HANDLE :: ResourceHandle {
+	idx = 0,
+	gen = 0,
+}
+
+EventHandle :: struct {
+	idx: u32,
+	gen: u32,
+}
+
+INVALID_EVENT_HANDLE :: EventHandle {
+	idx = 0,
+	gen = 0,
 }

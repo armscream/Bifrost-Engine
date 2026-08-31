@@ -1,10 +1,10 @@
 api_version = 1
-name = "SDL3_Renderer"
+name = "SDL3_GPU"
 component_kind = "Module"
 type = "Renderer"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
-description = "SDL3 GPU renderer."
+description = "stubbed SDL3_GPU module"
 flags = ["Runtime"]
 capabilities = ["Renderer", "GPU", "Materials", "Textures"]
 dependency_count = 0

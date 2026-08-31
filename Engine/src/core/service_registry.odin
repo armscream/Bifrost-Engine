@@ -4,6 +4,8 @@ package Core
 import "core:log"
 import "core:mem"
 
+import hm "core:container/handle_map"
+
 // ============================================================================
 // SERVICE REGISTRY
 // ============================================================================
@@ -14,11 +16,13 @@ import "core:mem"
 //
 //     DAG module -> Scheduler service
 //
-// Consumers should access services through ServiceHandle rather than
-// reaching directly into module implementations.
-//
+// Consumers access services through ServiceHandle rather than reaching
+// directly into module implementations. The Service_Registry type is public
+// because the SDK takes ^Service_Registry; the per-instance bookkeeping
+// (Service_Instance) is internal.
 // ============================================================================
 
+@(private)
 Service_Instance :: struct {
 	handle:   ServiceHandle,
 	owner:    ModuleHandle,
@@ -29,15 +33,16 @@ Service_Instance :: struct {
 }
 
 Service_Registry :: struct {
-	allocator:    mem.Allocator,
-	services:     [dynamic]Service_Instance,
-	generations:  [dynamic]u32,
-	free_indices: [dynamic]u32,
-	by_name:      map[string]ServiceHandle,
-	initialized:  bool,
+	allocator:   mem.Allocator,
+	slots:       hm.Dynamic_Handle_Map(Service_Instance, ServiceHandle),
+	by_name:     map[string]ServiceHandle,
+	initialized: bool,
 }
 
-//  Service_Registry init
+// ============================================================================
+// REGISTRY LIFECYCLE
+// ============================================================================
+
 @(private)
 service_registry_init :: proc(registry: ^Service_Registry, allocator: mem.Allocator) -> bool {
 	if registry == nil do return false
@@ -46,45 +51,36 @@ service_registry_init :: proc(registry: ^Service_Registry, allocator: mem.Alloca
 		return false
 	}
 	registry.allocator = allocator
-
-	// Slot zero is permanently invalid.
-	registry.services = make([dynamic]Service_Instance, 1, allocator)
-	append(&registry.services, Service_Instance{})
-
-	registry.generations = make([dynamic]u32, 1, allocator)
-	append(&registry.generations, SERVICE_GENERATION_INVALID)
-
+	hm.dynamic_init(&registry.slots, allocator)
 	registry.by_name = make(map[string]ServiceHandle, allocator)
-
 	registry.initialized = true
-
 	log.info("Service registry initialized.")
 	return true
 }
 
-// Service_Registry destroy
 @(private)
 service_registry_destroy :: proc(registry: ^Service_Registry) {
 	if registry == nil || !registry.initialized do return
 
-	// Services should normally already have been removed during module
-	// deactivation or unloading.
-	// so we defensively destroy anything that remains.
-	for i := 1; i < len(registry.services); i += 1 {
-		service := &registry.services[i]
-		if service.instance != nil && service.destroy != nil do service.destroy(service.instance)
+	// Defensively destroy anything that remains — services should normally
+	// already have been removed during module deactivation or unloading.
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for service, _ in hm.iterate(&it) {
+		if service.instance != nil && service.destroy != nil {
+			service.destroy(service.instance)
+		}
 	}
 
 	delete(registry.by_name)
-	delete(registry.free_indices)
-	delete(registry.generations)
-	delete(registry.services)
-
+	hm.dynamic_destroy(&registry.slots)
 	registry.allocator = {}
 	registry.initialized = false
 }
 
-// Validate service handle
+// ============================================================================
+// REGISTRY LOOKUP
+// ============================================================================
+
 @(private)
 service_registry_get :: proc(
 	registry: ^Service_Registry,
@@ -94,19 +90,17 @@ service_registry_get :: proc(
 	bool,
 ) {
 	if registry == nil || !registry.initialized do return nil, false
-	if handle.index == SERVICE_INDEX_INVALID do return nil, false
-	if handle.index >= u32(len(registry.services)) do return nil, false
-	if handle.generation == SERVICE_GENERATION_INVALID || handle.generation != registry.generations[handle.index] do return nil, false
-
-	service := &registry.services[handle.index]
-	if service.handle.index != handle.index do return nil, false
-	if service.handle.generation != handle.generation do return nil, false
+	if handle == INVALID_SERVICE_HANDLE do return nil, false
+	service, ok := hm.get(&registry.slots, handle)
+	if !ok do return nil, false
 	if service.instance == nil do return nil, false
-
 	return service, true
 }
 
-// Register service
+// ============================================================================
+// REGISTRATION
+// ============================================================================
+
 @(private)
 service_register :: proc(
 	registry: ^Service_Registry,
@@ -126,78 +120,60 @@ service_register :: proc(
 		return INVALID_SERVICE_HANDLE, false
 	}
 
-	// reject duplication service names.
+	// Reject duplicate service names.
 	if existing, found := registry.by_name[registration.name]; found {
-		log.error(
-			"Cannot register service '%s': service already registered [%d:%d].",
-			registration.name,
-			existing.index,
-			existing.generation,
-		)
+		if _, valid := service_registry_get(registry, existing); valid {
+			log.error(
+				"Cannot register service '%s': service already registered [%d:%d].",
+				registration.name,
+				existing.idx,
+				existing.gen,
+			)
+			return INVALID_SERVICE_HANDLE, false
+		}
+		// Stale by_name entry: drop it.
+		delete_key(&registry.by_name, registration.name)
+	}
+
+	handle, alloc_err := hm.add(
+		&registry.slots,
+		Service_Instance{
+			owner    = owner,
+			name     = registration.name,
+			instance = registration.instance,
+			destroy  = registration.destroy,
+			active   = true,
+		},
+	)
+	if alloc_err != nil {
+		log.error("Cannot register service '%s': allocator failure (%v).", registration.name, alloc_err)
 		return INVALID_SERVICE_HANDLE, false
 	}
 
-    // Allocate slot.
-	index: u32
-	if len(registry.free_indices) > 0 {
-		index = pop(&registry.free_indices)
-	} else {
-		index = u32(len(registry.services))
-		append(&registry.services, Service_Instance{})
-		append(&registry.generations, SERVICE_GENERATION_INVALID)
-	}
-
-	// Advance generation.
-	generation := registry.generations[index]
-	if generation == SERVICE_GENERATION_INVALID {
-		generation = 1
-	} else {
-		generation += 1
-		if generation == SERVICE_GENERATION_INVALID {
-			generation = 1
-		}
-	}
-	registry.generations[index] = generation
-	handle := ServiceHandle {
-		index      = index,
-		generation = generation,
-	}
-
-	// Create service instance.
-	service := Service_Instance {
-		handle   = handle,
-		owner    = owner,
-		name     = registration.name,
-		instance = registration.instance,
-		destroy  = registration.destroy,
-		active   = true,
-	}
-	registry.services[index] = service
-	registry.by_name[service.name] = handle
-	log.info("Service registered: %s [%d:%d]", service.name, handle.index, handle.generation)
+	registry.by_name[registration.name] = handle
+	log.info("Service registered: %s [%d:%d]", registration.name, handle.idx, handle.gen)
 
 	return handle, true
 }
 
-// Remove Service.
+@(private)
 service_unregister :: proc(registry: ^Service_Registry, handle: ServiceHandle) -> bool {
 	if registry == nil || !registry.initialized do return false
 	service, ok := service_registry_get(registry, handle)
 	if !ok do return false
 
-	// remove name lookup.
+	// Remove name lookup.
 	if existing, found := registry.by_name[service.name]; found {
 		if existing == handle {
 			delete_key(&registry.by_name, service.name)
 		}
 	}
 
-	// destroy service-owned object.
+	// Destroy service-owned object.
 	if service.instance != nil && service.destroy != nil do service.destroy(service.instance)
 
-	// clear slot.
-	registry.services[handle.index] = Service_Instance{}
-	// Generation is deliberately preserved.
-	append(&registry.free_indices, handle.index)
+	// Remove from handle map (does not free the instance backing storage;
+	// the map owns the slot).
+	_, _ = hm.remove(&registry.slots, handle)
 	return true
 }

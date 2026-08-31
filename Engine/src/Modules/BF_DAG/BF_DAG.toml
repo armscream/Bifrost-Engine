@@ -1,10 +1,10 @@
 api_version = 1
-name = "SDL3_Renderer"
+name = "BF_DAG"
 component_kind = "Module"
-type = "Renderer"
+type = "Scheduler"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
-description = "SDL3 GPU renderer."
+description = "DAG Scheduler for Bifrost Engine."
 flags = ["Runtime"]
-capabilities = ["Renderer", "GPU", "Materials", "Textures"]
+capabilities = ["Custom"]
 dependency_count = 0

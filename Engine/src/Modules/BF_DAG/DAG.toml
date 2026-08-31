@@ -1,7 +1,10 @@
+api_version = 1
 name = "DAG"
-type = "Module"
+component_kind = "Module"
+type = "Other"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
 description = "Stub DAG scheduler — Directed Acyclic Graph task and systems scheduler, full impl pending."
 flags = ["Runtime"]
 capabilities = ["Custom"]
+dependency_count = 0

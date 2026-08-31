@@ -1,15 +1,18 @@
-name = "Editor"
-type = "Module"
+api_version = 1
+name = "BF_Editor"
+component_kind = "Module"
+type = "Editor"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
 description = "Stub Editor module."
 flags = ["Editor_Only"]
 capabilities = ["Editor"]
+dependency_count = 1
 
 [[dependencies]]
-name = "DAG"
+name = "BF_DAG"
 min_version = { major = 0, minor = 0, patch = 1 }
-max_version = { major = 0, minor = 0, patch = 999 }
+max_version = { major = 9, minor = 9, patch = 9 }
 has_min_version = true
-has_max_version = false
+has_max_version = true
 optional = false

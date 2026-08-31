@@ -173,9 +173,9 @@ load_project_config :: proc() -> Core.Project_Settings {
 
 	fmt.printfln(
 		"  Version: v%d.%d.%d",
-		config.major,
-		config.minor,
-		config.patch,
+		config.version.major,
+		config.version.minor,
+		config.version.patch,
 	)
 	CONFIG_STATE = .Loaded
 	return config
@@ -461,7 +461,7 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 // The Editor entry lives in settings.modules. A single constant lets us filter
 // it consistently for non-editor profiles.
 //
-EDITOR_MODULE_NAME :: "Editor"
+EDITOR_MODULE_NAME :: "BF_Editor"
 
 
 // ============================================================================
@@ -875,9 +875,9 @@ main :: proc() {
 
 		fmt.printfln(
 			" Version: v%d.%d.%d",
-			project_config.major,
-			project_config.minor,
-			project_config.patch,
+			project_config.version.major,
+			project_config.version.minor,
+			project_config.version.patch,
 		)
 
 		fmt.printfln(" Config:  %s", PROJECT_CONFIG_PATH)

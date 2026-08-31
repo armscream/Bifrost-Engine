@@ -1,35 +1,32 @@
 // Engine/src/Core/extensions.odin
 package Core
 
-import "core:dynlib"
 import "core:log"
 import "core:mem"
 
+import hm "core:container/handle_map"
+
 // ============================================================================
 // EXTENSION API
-// ============================================================================
+
+// Extensions augment modules. An extension is not a replacement for a module;
+// it attaches additional functionality to an existing module or to a
+// module-defined extension point.
 //
-// Extensions augment modules.
-//
-// An extension is not a replacement for a module. It attaches additional
-// functionality to an existing module or module-defined extension point.
-//
-// Example:
-//
-//     Bifrost_Renderer
-//          ^
-//          |
-//     DDGI Extension
+// Example:    Bifrost_Renderer <- DDGI Extension
 //
 // The renderer remains the owner of the primary renderer architecture.
 // DDGI contributes additional functionality through the renderer's
 // extension interface.
 //
-// ============================================================================
+// Only the `Extension_*` types marked as part of the ABI are visible to
+// extensions; the rest of the manager/registry machinery is package-internal.
+
+// Extension_API is what an extension exposes through the LIB entry point.
 Extension_API :: struct {
 	api_version:      u32,
-	identity:         DLL_Identity,
-	dependencies:     [^]DLL_Dependency,
+	identity:         Lib_Descriptor,
+	dependencies:     [^]Lib_Dependency,
 	dependency_count: u32,
 	load:             proc(ctx: ^Extension_Context) -> bool,
 	register:         proc(ctx: ^Extension_Context) -> bool,
@@ -38,42 +35,9 @@ Extension_API :: struct {
 	unload:           proc(ctx: ^Extension_Context),
 }
 
-Extension_Registry :: struct {
-	allocator:    mem.Allocator,
-	extensions:   [dynamic]Loaded_Extension,
-	generations:  [dynamic]u32,
-	free_indices: [dynamic]u32,
-	by_name:      map[string]ExtensionHandle,
-	initialized:  bool,
-}
-
-Loaded_Extension :: struct {
-	handle:       ExtensionHandle,
-	library:      dynlib.Library,
-	api:          Extension_API,
-	ctx:          Extension_Context,
-	state:        Load_State,
-	registration: Extension_Registration,
-}
-
-// ============================================================================
-// EXTENSION CONTEXT
-// ============================================================================
-//
-// The context is the extension's gateway into Core.
-//
-// We will expand this as the extension architecture develops.
-//
-// In particular, this is where we can eventually expose:
-//
-//     - extension's own handle
-//     - owning module handle
-//     - Core SDK
-//     - service registry access
-//     - module lookup
-//     - extension-point lookup
-//
-// ============================================================================
+// Extension_Context is the extension's gateway into Core. Will grow to
+// include service registry access, module lookup, and extension-point lookup.
+@(private)
 Extension_Context :: struct {
 	registry:         ^Extension_Registry,
 	handle:           ExtensionHandle,
@@ -81,10 +45,21 @@ Extension_Context :: struct {
 	service_registry: ^Service_Registry,
 }
 
-// Registration is collected during the extension registration phase.
-//
-// The extension does not directly mutate Core registries. Core consumes these
-// declarations and performs the actual registration.
+// Extension_Target identifies a module that this extension augments.
+Extension_Target :: struct {
+	module:      ModuleHandle,
+	min_version: Version,
+	max_version: Version,
+}
+
+Extension_Registry :: struct {
+	allocator:   mem.Allocator,
+	slots:       hm.Dynamic_Handle_Map(Loaded_Extension, ExtensionHandle),
+	by_name:     map[string]ExtensionHandle,
+	initialized: bool,
+}
+
+@(private)
 Extension_Registration :: struct {
 	services:  [dynamic]Service_Registration,
 	systems:   [dynamic]System_Registration,
@@ -93,49 +68,51 @@ Extension_Registration :: struct {
 	targets:   [dynamic]Extension_Target,
 }
 
-// ============================================================================
-// EXTENSION TARGET
-// ============================================================================
-//
-// Identifies a module that this extension augments.
-//
-// Later we can evolve this into an actual extension-point system:
-//
-//     Bifrost_Renderer::GI
-//     Bifrost_Renderer::RenderPass
-//     Animation::GraphNode
-//     ECS::Component
-//
-// For now the module identity is enough.
-//
-// ============================================================================
-Extension_Target :: struct {
-	module:      ModuleHandle,
-	min_version: Version,
-	max_version: Version,
+@(private)
+Loaded_Extension :: struct {
+	handle:       ExtensionHandle,
+	library:      Dynamic_Library,
+	api:          Extension_API,
+	ctx:          Extension_Context,
+	state:        Component_State,
+	registration: Extension_Registration,
 }
 
-// Regitry initialization
+Extension_Manager :: struct {
+	registry:    Extension_Registry,
+	allocator:   mem.Allocator,
+	initialized: bool,
+}
+
+// ==========================
+// REGISTRY HELPERS
+
 @(private)
 extension_registry_init :: proc(registry: ^Extension_Registry, allocator: mem.Allocator) -> bool {
 	if registry == nil do return false
-	if registry.initialized {log.warn("Extension registry already initialized.")
-		return false}
+	if registry.initialized {
+		log.warn("Extension registry already initialized.")
+		return false
+	}
 
 	registry.allocator = allocator
-
-	//Slot zero is permanently invalid.
-	registry.extensions = make([dynamic]Loaded_Extension, 1, allocator)
-	append(&registry.extensions, Loaded_Extension{})
-
-	registry.generations = make([dynamic]u32, 1, allocator)
-	append(&registry.generations, EXTENSION_GENERATION_INVALID)
-
-	registry.free_indices = make([dynamic]u32, 0, allocator)
+	hm.dynamic_init(&registry.slots, allocator)
 	registry.by_name = make(map[string]ExtensionHandle, allocator)
 	registry.initialized = true
 	log.info("Extension registry initialized.")
 	return true
+}
+
+@(private)
+extension_registry_destroy :: proc(registry: ^Extension_Registry) {
+	if registry == nil || !registry.initialized do return
+	// Extensions should normally already have been unloaded.
+	// We intentionally do not call unload here — destruction order is
+	// handled by engine shutdown.
+	delete(registry.by_name)
+	hm.dynamic_destroy(&registry.slots)
+	registry.allocator = {}
+	registry.initialized = false
 }
 
 @(private)
@@ -145,26 +122,13 @@ extension_registration_init :: proc(
 ) {
 	if registration == nil do return
 
-	registration.targets = make([dynamic]Extension_Target, 0, allocator)
-	registration.services = make([dynamic]Service_Registration, 0, allocator)
-	registration.systems = make([dynamic]System_Registration, 0, allocator)
+	registration.targets   = make([dynamic]Extension_Target, 0, allocator)
+	registration.services  = make([dynamic]Service_Registration, 0, allocator)
+	registration.systems   = make([dynamic]System_Registration, 0, allocator)
 	registration.resources = make([dynamic]Resource_Registration, 0, allocator)
-	registration.events = make([dynamic]Event_Registration, 0, allocator)
+	registration.events    = make([dynamic]Event_Registration, 0, allocator)
 }
 
-@(private)
-extension_registry_destroy :: proc(registry: ^Extension_Registry) {
-	if registry == nil || !registry.initialized do return
-	// Extensions should normally already have been unloaded
-	// we intentionally do no call unload here. Destruction order should
-	// already have been handled by engine shutdown.
-	delete(registry.by_name)
-	delete(registry.free_indices)
-	delete(registry.generations)
-	delete(registry.extensions)
-	registry.allocator = {}
-	registry.initialized = false
-}
 @(private)
 extension_registration_destroy :: proc(registration: ^Extension_Registration) {
 	if registration == nil do return
@@ -175,7 +139,7 @@ extension_registration_destroy :: proc(registration: ^Extension_Registration) {
 	delete(registration.resources)
 	delete(registration.events)
 }
-// ext lookup
+
 @(private)
 extension_registry_get :: proc(
 	registry: ^Extension_Registry,
@@ -185,16 +149,15 @@ extension_registry_get :: proc(
 	bool,
 ) {
 	if registry == nil || !registry.initialized do return nil, false
-	if handle.index == EXTENSION_INDEX_INVALID do return nil, false
-	if handle.index >= u32(len(registry.extensions)) do return nil, false
-	if handle.generation == EXTENSION_GENERATION_INVALID || handle.generation != registry.generations[handle.index] do return nil, false
-
-	extension := &registry.extensions[handle.index]
-	if extension.handle.index != handle.index do return nil, false
-	if extension.handle.generation != handle.generation do return nil, false
-	return extension, true
+	if handle == INVALID_EXTENSION_HANDLE do return nil, false
+	return hm.get(&registry.slots, handle)
 }
-// find by name
+
+extension_is_valid :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
+	_, ok := extension_registry_get(registry, handle)
+	return ok
+}
+
 @(private)
 extension_registry_find :: proc(
 	registry: ^Extension_Registry,
@@ -210,53 +173,9 @@ extension_registry_find :: proc(
 	if _, valid := extension_registry_get(registry, handle); !valid do return INVALID_EXTENSION_HANDLE, false
 	return handle, true
 }
-extension_is_valid :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
-	_, ok := extension_registry_get(registry, handle)
-	return ok
-}
 
-@(private)
-extension_registry_allocate_handle :: proc(registry: ^Extension_Registry) -> ExtensionHandle {
-	if registry == nil || !registry.initialized do return INVALID_EXTENSION_HANDLE
-	index: u32
-
-	// Reuse a previously released slot.
-	if len(registry.free_indices) > 0 {
-		last := len(registry.free_indices) - 1
-		index = registry.free_indices[last]
-		// [dynamic] cannot be assigned a sliced value.
-		pop(&registry.free_indices)
-	} else {
-		index = u32(len(registry.extensions))
-		append(&registry.extensions, Loaded_Extension{})
-		append(&registry.generations, EXTENSION_GENERATION_INVALID)
-	}
-
-	// Advance generation.
-	generation := registry.generations[index]
-	if generation == EXTENSION_GENERATION_INVALID {
-		generation = 1
-	} else {
-		generation += 1
-		if generation == EXTENSION_GENERATION_INVALID {generation = 1}
-	}
-	registry.generations[index] = generation
-	return ExtensionHandle{index = index, generation = generation}
-}
-
-// Extension slot release
-@(private)
-extension_registry_release_handle :: proc(
-	registry: ^Extension_Registry,
-	handle: ExtensionHandle,
-) -> bool {
-	if registry == nil || !registry.initialized do return false
-	if handle.index == EXTENSION_INDEX_INVALID || handle.index >= u32(len(registry.extensions)) do return false
-	if registry.generations[handle.index] != handle.generation do return false
-	registry.generations[handle.index] = EXTENSION_GENERATION_INVALID
-	append(&registry.free_indices, handle.index)
-	return true
-}
+// =======================
+// TARGET VALIDATION
 
 @(private)
 extension_validate_targets :: proc(
@@ -283,19 +202,19 @@ extension_validate_targets :: proc(
 			log.error(
 				"Extension '%s' targets an invalid module handle [%d:%d].",
 				extension.api.identity.name,
-				target.module.index,
-				target.module.generation,
+				target.module.idx,
+				target.module.gen,
 			)
 			return false
 		}
 
-		actual_version := module.api.identity.version
+		actual_version := module.descriptor.identity.version
 
 		if !version_in_range(actual_version, target.min_version, target.max_version) {
 			log.error(
 				"Extension '%s' target module '%s' has incompatible version %d.%d.%d.",
 				extension.api.identity.name,
-				module.api.identity.name,
+				module.descriptor.identity.name,
 				actual_version.major,
 				actual_version.minor,
 				actual_version.patch,
@@ -305,231 +224,14 @@ extension_validate_targets :: proc(
 	}
 	return true
 }
+
+// ============================================================================
+// LIFECYCLE PHASES
+// ============================================================================
+
+// extension_register_all runs each extension's register() callback and
+// validates its declared targets. Called by extension_manager_register_all.
 @(private)
-extension_get_registration :: proc(
-	registry: ^Extension_Registry,
-	handle: ExtensionHandle,
-) -> (
-	^Extension_Registration,
-	bool,
-) {
-	if registry == nil || !registry.initialized do return nil, false
-	extension, ok := extension_registry_get(registry, handle)
-	if !ok do return nil, false
-	return &extension.registration, true
-}
-
-// Target module
-@(private)
-extension_registration_add_target :: proc(
-	registry: ^Extension_Registry,
-	extension: ExtensionHandle,
-	target: Extension_Target,
-) -> bool {
-	if registry == nil || !registry.initialized do return false
-	registration, ok := extension_get_registration(registry, extension)
-	if !ok do return false
-
-	instance, instance_ok := extension_registry_get(registry, extension)
-	if !instance_ok do return false
-
-	if instance.state != .Registered {
-		log.error(
-			"Extension [%d:%d] cannot register a target: extension is not registered.",
-			extension.index,
-			extension.generation,
-		)
-		return false
-	}
-	if target.module == INVALID_MODULE_HANDLE {
-		log.error(
-			"Extension [%d:%d] cannot register an empty target module.",
-			extension.index,
-			extension.generation,
-		)
-		return false
-	}
-	append(&registration.targets, target)
-	return true
-}
-
-@(private)
-extension_registration_add_service :: proc(
-	registry: ^Extension_Registry,
-	extension: ExtensionHandle,
-	registration: Service_Registration,
-) -> bool {
-	if registry == nil || !registry.initialized do return false
-
-	extension_registration, ok := extension_get_registration(registry, extension)
-	if !ok do return false
-
-	instance, instance_ok := extension_registry_get(registry, extension)
-	if !instance_ok do return false
-
-	if instance.state != .Registered {
-		log.error(
-			"Extension [%d:%d] cannot register a service: extension is not Registered.",
-			extension.index,
-			extension.generation,
-		)
-		return false
-	}
-
-	append(&extension_registration.services, registration)
-
-	return true
-}
-@(private)
-extension_registration_add_system :: proc(
-	registry: ^Extension_Registry,
-	extension: ExtensionHandle,
-	registration: System_Registration,
-) -> bool {
-	if registry == nil || !registry.initialized do return false
-
-	extension_registration, ok := extension_get_registration(registry, extension)
-	if !ok do return false
-
-	instance, instance_ok := extension_registry_get(registry, extension)
-	if !instance_ok do return false
-
-	if instance.state != .Registered {
-		log.error(
-			"Extension [%d:%d] cannot register a system: extension is not Registered.",
-			extension.index,
-			extension.generation,
-		)
-		return false
-	}
-
-	append(&extension_registration.systems, registration)
-	return true
-}
-@(private)
-extension_registration_add_resource :: proc(
-	registry: ^Extension_Registry,
-	extension: ExtensionHandle,
-	registration: Resource_Registration,
-) -> bool {
-	if registry == nil || !registry.initialized do return false
-
-	extension_registration, ok := extension_get_registration(registry, extension)
-	if !ok do return false
-
-	instance, instance_ok := extension_registry_get(registry, extension)
-	if !instance_ok do return false
-	if instance.state != .Registered {
-		log.error(
-			"Extension [%d:%d] cannot register a resource: extension is not Registered.",
-			extension.index,
-			extension.generation,
-		)
-		return false
-	}
-	append(&extension_registration.resources, registration)
-	return true
-}
-@(private)
-extension_registration_add_event :: proc(
-	registry: ^Extension_Registry,
-	extension: ExtensionHandle,
-	registration: Event_Registration,
-) -> bool {
-	if registry == nil || !registry.initialized do return false
-
-	extension_registration, ok := extension_get_registration(registry, extension)
-	if !ok do return false
-
-	instance, instance_ok := extension_registry_get(registry, extension)
-
-	if !instance_ok do return false
-	if instance.state != .Registered {
-		log.error(
-			"Extension [%d:%d] cannot register an event: extension is not Registered.",
-			extension.index,
-			extension.generation,
-		)
-		return false
-	}
-	append(&extension_registration.events, registration)
-	return true
-}
-
-@(private)
-extension_load_project_extensions :: proc() -> bool {
-	registry := &GLOBAL_EXTENSION_REGISTRY
-	if registry == nil || !registry.initialized {
-		log.error("Cannot load project extensions: registry is not initialized.")
-		return false
-	}
-
-	for project_extension in GLOBAL_PROJECT_SETTINGS.extensions {
-		if !project_extension.enabled do continue
-		log.info("Loading project extension: %s", project_extension.name)
-
-		if !extension_load(registry, project_extension) {
-			log.error("Failed to load extension '%s'.", project_extension.name)
-			return false
-		}
-	}
-	return true
-}
-
-// ====================
-// LOAD ONE EXTENSION
-@(private)
-extension_load :: proc(registry: ^Extension_Registry, project: Project_Extension) -> bool {
-	if registry == nil || !registry.initialized do return false
-
-	if len(project.name) == 0 {
-		log.error("Cannot load extension with empty name.")
-		return false
-	}
-
-	_, found := extension_registry_find(registry, project.name)
-	if found {
-		log.error("Extension '%s' is already loaded.", project.name)
-		return false
-	}
-	// DLL discovery/loading
-	// TODO:
-	// Use the same DLL discovery mechanism as module_load_project_modules().
-	//
-	// We deliberately keep this isolated so the extension registry does not
-	// know anything about project paths.
-	log.warn("Extension '%s': DLL loading is not implemented yet.", project.name)
-
-	return false
-}
-
-@(private)
-extension_validate_project_version :: proc(
-	extension: ^Loaded_Extension,
-	project: Project_Extension,
-) -> bool {
-	if extension == nil do return false
-	actual := extension.api.identity.version
-	if version_is_zero(project.version) {return true}
-
-	if version_compare(actual, project.version) != 0 {
-		log.error(
-			"Extension '%s': project requested version %d.%d.%d but loaded %d.%d.%d.",
-			project.name,
-			project.version.major,
-			project.version.minor,
-			project.version.patch,
-			actual.major,
-			actual.minor,
-			actual.patch,
-		)
-		return false
-	}
-	return true
-}
-
-// ==========================
-// REGISTER ALL EXTENSIONS
 extension_register_all :: proc(
 	registry: ^Extension_Registry,
 	module_registry: ^Module_Registry,
@@ -540,8 +242,8 @@ extension_register_all :: proc(
 
 	log.info("Registering extensions...")
 
-	for i := 1; i < len(registry.extensions); i += 1 {
-		extension := &registry.extensions[i]
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for extension, _ in hm.iterate(&it) {
 		if extension.state != .Loaded do continue
 		log.info("Registering extension: %s", extension.api.identity.name)
 
@@ -573,8 +275,9 @@ extension_register_all :: proc(
 	return true
 }
 
-// ===============================
-// RESOLVE EXTENSION DEPENDENCIES
+// extension_resolve_dependencies walks each extension's declared
+// dependencies, validating both presence and version range.
+@(private)
 extension_resolve_dependencies :: proc(
 	registry: ^Extension_Registry,
 	module_registry: ^Module_Registry,
@@ -585,17 +288,12 @@ extension_resolve_dependencies :: proc(
 
 	log.info("Resolving extension dependencies...")
 
-	for i := 1; i < len(registry.extensions); i += 1 {
-		extension := &registry.extensions[i]
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for extension, _ in hm.iterate(&it) {
 		if extension.state != .Loaded do continue
 
-		// --------------------------------------------------------------------
-		// Extension dependencies
-		// --------------------------------------------------------------------
 		for dep_index := u32(0); dep_index < extension.api.dependency_count; dep_index += 1 {
-
 			dependency := extension.api.dependencies[dep_index]
-
 			dependency_name := string(dependency.name)
 
 			dependency_handle, found := extension_registry_find(registry, dependency_name)
@@ -649,14 +347,13 @@ extension_resolve_dependencies :: proc(
 	return true
 }
 
-// =========================
-// ACTIVATE ALL EXTENSIONS
+@(private)
 extension_activate_all :: proc(registry: ^Extension_Registry) -> bool {
 	if registry == nil || !registry.initialized do return false
 	log.info("Activating extensions...")
 
-	for i := 1; i < len(registry.extensions); i += 1 {
-		extension := &registry.extensions[i]
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for extension, _ in hm.iterate(&it) {
 		if extension.state != .Registered do continue
 		log.info("Activating extension: %s", extension.api.identity.name)
 
@@ -677,14 +374,19 @@ extension_activate_all :: proc(registry: ^Extension_Registry) -> bool {
 	return true
 }
 
-// =========================
-// DEACTIVATE ALL EXTENSIONS
+@(private)
 extension_deactivate_all :: proc(registry: ^Extension_Registry) -> bool {
 	if registry == nil || !registry.initialized do return false
 	log.info("Deactivating extensions...")
-	// Reverse order.
-	for i := len(registry.extensions) - 1; i >= 1; i -= 1 {
-		extension := &registry.extensions[i]
+
+	// We need reverse iteration; collect valid handles and walk back.
+	order := make([dynamic]ExtensionHandle, 0, context.temp_allocator)
+	defer delete(order)
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for _, h in hm.iterate(&it) do append(&order, h)
+
+	for i := len(order) - 1; i >= 0; i -= 1 {
+		extension := hm.get(&registry.slots, order[i]) or_continue
 		if extension.state != .Active do continue
 		log.info("Deactivating extension: %s", extension.api.identity.name)
 
@@ -696,14 +398,19 @@ extension_deactivate_all :: proc(registry: ^Extension_Registry) -> bool {
 	return true
 }
 
-// =======================
-// UNLOAD ALL EXTENSIONS
+@(private)
 extension_unload_all :: proc(registry: ^Extension_Registry) -> bool {
 	if registry == nil || !registry.initialized do return false
 	log.info("Unloading extensions...")
-	// Reverse order.
-	for i := len(registry.extensions) - 1; i >= 1; i -= 1 {
-		extension := &registry.extensions[i]
+
+	// Reverse iteration: collect handles then walk back.
+	order := make([dynamic]ExtensionHandle, 0, context.temp_allocator)
+	defer delete(order)
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for _, h in hm.iterate(&it) do append(&order, h)
+
+	for i := len(order) - 1; i >= 0; i -= 1 {
+		extension := hm.get(&registry.slots, order[i]) or_continue
 		if extension.state == .Active {
 			log.error("Cannot unload active extension '%s'.", extension.api.identity.name)
 			return false
@@ -721,7 +428,6 @@ extension_unload_all :: proc(registry: ^Extension_Registry) -> bool {
 		name := string(extension.api.identity.name)
 		if existing, found := registry.by_name[name]; found {
 			if existing == extension.handle {
-				// FIX: 'name' is now a string, matching the map key type
 				delete_key(&registry.by_name, name)
 			}
 		}
@@ -729,10 +435,92 @@ extension_unload_all :: proc(registry: ^Extension_Registry) -> bool {
 		extension_registration_destroy(&extension.registration)
 
 		// Close DLL.
-		if extension.library != {} do dynlib.unload_library(extension.library)
-		handle := extension.handle
+		if extension.library != {} do dynamic_library_close(&extension.library)
 		extension.state = .Unloaded
-		extension_registry_release_handle(registry, handle)
+		_, _ = hm.remove(&registry.slots, extension.handle)
 	}
 	return true
+}
+
+// ============================================================================
+// EXTENSION MANAGER API
+// ============================================================================
+
+extension_manager_init :: proc(manager: ^Extension_Manager, allocator: mem.Allocator) -> bool {
+	if manager == nil do return false
+	if manager.initialized {
+		log.warn("Extension manager is already initialized")
+		return false
+	}
+	manager.allocator = allocator
+	if !extension_registry_init(&manager.registry, allocator) {
+		log.warn("Failed to initialize extension registry")
+		return false
+	}
+	manager.initialized = true
+	log.info("Extension manager initialized.")
+	return true
+}
+
+extension_manager_destroy :: proc(manager: ^Extension_Manager) {
+	if manager == nil || !manager.initialized do return
+	extension_manager_unload_all(manager)
+	extension_registry_destroy(&manager.registry)
+	manager.allocator = {}
+	manager.initialized = false
+}
+
+// extension_manager_load_project walks GLOBAL_PROJECT_SETTINGS.extensions
+// and loads each enabled extension. DLL discovery mirrors the module path;
+// see module_manager_load_project.
+extension_manager_load_project :: proc(manager: ^Extension_Manager) -> bool {
+	if manager == nil || !manager.initialized do return false
+
+	for project_extension in GLOBAL_PROJECT_SETTINGS.extensions {
+		if !project_extension.enabled do continue
+		log.info("Loading project extension: %s", project_extension.name)
+		if !extension_load_one(&manager.registry, project_extension) {
+			log.error("Failed to load extension '%s'.", project_extension.name)
+			return false
+		}
+	}
+	return true
+}
+
+extension_manager_resolve :: proc(manager: ^Extension_Manager) -> bool {
+	if manager == nil || !manager.initialized do return false
+	return extension_resolve_dependencies(&manager.registry, &GLOBAL_MODULE_MANAGER.registry)
+}
+
+extension_manager_register_all :: proc(manager: ^Extension_Manager) -> bool {
+	if manager == nil || !manager.initialized do return false
+	return extension_register_all(&manager.registry, &GLOBAL_MODULE_MANAGER.registry)
+}
+
+extension_manager_activate_all :: proc(manager: ^Extension_Manager) -> bool {
+	if manager == nil || !manager.initialized do return false
+	return extension_activate_all(&manager.registry)
+}
+
+extension_manager_deactivate_all :: proc(manager: ^Extension_Manager) -> bool {
+	if manager == nil || !manager.initialized do return false
+	return extension_deactivate_all(&manager.registry)
+}
+
+extension_manager_unload_all :: proc(manager: ^Extension_Manager) -> bool {
+	if manager == nil || !manager.initialized do return false
+	return extension_unload_all(&manager.registry)
+}
+
+// ============================================================================
+// EXTENSION LOAD (placeholder)
+// ============================================================================
+//
+// TODO: mirror the module_manager_load_project DLL discovery once the
+// extension manifest pipeline lands in rbs.
+@(private)
+extension_load_one :: proc(registry: ^Extension_Registry, project: Project_Extension) -> bool {
+	_ = registry
+	log.warn("Extension '%s': DLL loading is not implemented yet.", project.name)
+	return false
 }

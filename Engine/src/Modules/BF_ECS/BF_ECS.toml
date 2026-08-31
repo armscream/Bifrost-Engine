@@ -1,12 +1,12 @@
 api_version = 1
-name = "Box3D_Physics"
+name = "BF_ECS"
 component_kind = "Module"
-type = "Physics"
+type = "ECS"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
-description = "Box3D for Bifrost Engine, stubb module."
+description = "ECS for Bifrost Engine."
 flags = ["Runtime"]
-capabilities = ["Physics"]
+capabilities = ["ECS"]
 dependency_count = 1
 
 [[dependencies]]

@@ -1,7 +1,7 @@
 package Project
 
 import "core:fmt"
-import Engine "../Engine/src/core"
+import Engine "../Engine/src/Core"
 
 RUN_EDITOR :: #config(RUN_EDITOR, false)
 
