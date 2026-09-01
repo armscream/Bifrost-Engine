@@ -15,7 +15,7 @@ main :: proc() {
 	fmt.println("Calling Engine.init()...")
 
 	init_ok := Engine.init(
-		run_game,
+		&APP,          // ^Engine_App_Interface
 		RUN_EDITOR,
 	)
 
@@ -49,6 +49,130 @@ main :: proc() {
 }
 
 
-run_game :: proc() {
-	fmt.println("Running game...")
+// ============================================================================
+// ENGINE_APPLICATION_INTERFACE
+// ============================================================================
+//
+// The application fills this struct in once, before Engine.init, and the
+// engine calls each hook at the appropriate point in the lifecycle.
+//
+// The struct is intentionally package-level (not a local in main) so the
+// hook procs can capture it without a closure. Hooks are proc literals,
+// so we store the necessary state in module-level globals below.
+APP: Engine.Engine_App_Interface = Engine.Engine_App_Interface {
+	on_init     = on_init,
+	on_pre_tick = on_pre_tick,
+	on_present  = on_present,
+	on_shutdown = on_shutdown,
+}
+
+// ============================================================================
+// APPLICATION STATE
+// ============================================================================
+//
+// Game-side state the sample "gameplay" code reaches for. Real games
+// would put their own structs here; this is the bare minimum that proves
+// the DAG is firing per-frame.
+TICK_COUNT:      u64
+LAST_FRAME_INDEX: u64
+LAST_DT:         f32
+
+// Cached ^World recovered during on_init via engine_get_ecs_world. The
+// engine puts the same pointer into every Scheduler_Frame.world.ptr so
+// the sample system can reach it without an extra lookup.
+ECS_WORLD: rawptr
+
+// ============================================================================
+// HOOKS
+// ============================================================================
+
+on_init :: proc() {
+	fmt.println("[App] on_init: registering game systems + fetching ECS world")
+
+	// Game-side dependency: INPUT before PHYSICS. Names are resolved
+	// against the engine's system registry at scheduler_build time;
+	// each entry requires that BOTH names have already been
+	// registered (order between this and the add_system calls
+	// doesn't matter — the engine sorts by name).
+	ok := Engine.engine_register_system_dependency("Game.Input", "Game.Physics")
+	if !ok {
+		fmt.println("[App] dependency registration failed")
+	}
+
+	// Game system: "Game.Input" — stage PreUpdate, runs before Game.Physics.
+	Engine.engine_register_system(
+		"Game.Input",
+		game_system_input,
+		Engine.System_Info{
+			stage = .PreUpdate,
+			flags = 0,
+		},
+	)
+
+	// Game system: "Game.Physics" — stage PreUpdate, runs after Game.Input
+	// (via the dependency above). The DAG compiler emits the edge.
+	Engine.engine_register_system(
+		"Game.Physics",
+		game_system_physics,
+		Engine.System_Info{
+			stage = .PreUpdate,
+			flags = 0,
+		},
+	)
+
+	// Optional: pull the BF_ECS World if the module is loaded. Game
+	// code uses the SDK helper, never imports BF_ECS directly.
+	ECS_WORLD = Engine.engine_get_ecs_world()
+	fmt.println("[App] ecs world =", ECS_WORLD)
+}
+
+on_pre_tick :: proc(dt: f32, frame_index: u64) {
+	LAST_DT = dt
+	LAST_FRAME_INDEX = frame_index
+	// Cheap way to demonstrate the hook is firing: every 60 frames,
+	// log progress.
+	if frame_index % 60 == 0 {
+		fmt.printf("[App] pre_tick frame=%d dt=%.4f ticks=%d\n", frame_index, dt, TICK_COUNT)
+	}
+
+	// First invocation only: print a one-shot so the loop is visibly
+	// running.
+	if frame_index == 1 {
+		fmt.println("[App] pre_tick fired for the first time")
+	}
+}
+
+on_present :: proc(dt: f32, frame_index: u64) {
+	// Quit after a small number of frames so the demo terminates
+	// without spamming logs forever. Set higher (or remove) to run
+	// longer.
+	if frame_index >= 30 {
+		fmt.println("[App] present reached frame_index 30 — quitting")
+		Engine.engine_quit()
+	}
+}
+
+on_shutdown :: proc() {
+	fmt.println("[App] on_shutdown")
+	ECS_WORLD = nil
+}
+
+// ============================================================================
+// SYSTEM CALLBACKS
+// ============================================================================
+//
+// Each proc(rawptr) is invoked by the DAG scheduler on whatever worker
+// thread claimed the node. The ctx points at a Scheduler_Frame whose
+// lifetime is bounded by the Engine.run loop's frame iteration. Don't
+// store the pointer past the callback's return.
+game_system_input :: proc(ctx: rawptr) {
+	frame := cast(^Engine.Scheduler_Frame)ctx
+	if frame == nil do return
+	// No work — the system's existence is what we are proving here.
+}
+
+game_system_physics :: proc(ctx: rawptr) {
+	frame := cast(^Engine.Scheduler_Frame)ctx
+	if frame == nil do return
+	TICK_COUNT += 1
 }

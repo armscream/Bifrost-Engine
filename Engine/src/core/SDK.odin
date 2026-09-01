@@ -1,6 +1,7 @@
 // Engine\src\Core\SDK.odin
 package Core
 
+import "core:log"
 import "core:mem"
 
 // ============================================================================
@@ -15,135 +16,55 @@ import "core:mem"
 // can be tested with isolated registries; the engine passes its globals
 // through these entry points.
 //
-// Forward-declared procedures (e.g. emit_event, asset_load) are intentionally
-// only signatures here — their implementations live in the modules that
-// own each subsystem.
+// Forward-declared procedures (e.g. emit_event, asset_load) are
+// intentionally only signatures here — their implementations live in the
+// modules that own each subsystem. They log a warning if called before
+// the corresponding module is loaded so missing-module bugs are loud.
 // ============================================================================
 
 // ============================================================================
 // ENGINE
 // ============================================================================
-engine_is_editor  :: proc() -> bool
-engine_is_running :: proc() -> bool
-engine_delta_time :: proc() -> f32
+engine_is_editor  :: proc() -> bool { return RUN_EDITOR }
+engine_is_running :: proc() -> bool { return ENGINE_RUNNING }
+engine_delta_time :: proc() -> f32 {
+	// No historical dt storage on the engine side; modules track their
+	// own. Return 0 for v1; future code can plumb a last_dt in.
+	return 0
+}
 
 // ============================================================================
 // MODULES
 // ============================================================================
-
-// module_find resolves a module by name.
-module_find :: proc(registry: ^Module_Registry, name: string) -> (ModuleHandle, bool) {
-	if registry == nil || !registry.initialized do return INVALID_MODULE_HANDLE, false
-	if len(name) == 0 do return INVALID_MODULE_HANDLE, false
-	handle, found := registry.by_name[name]
-	if !found do return INVALID_MODULE_HANDLE, false
-
-	// Validate the lookup result. This protects against stale/corrupt
-	// lookup entries.
-	if !module_is_valid(registry, handle) do return INVALID_MODULE_HANDLE, false
-
-	return handle, true
-}
-
-// module_is_valid returns true if the module is still valid.
-module_is_valid :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> bool {
-	_, ok := module_registry_get(registry, handle)
-	return ok
-}
-
-// module_is_loaded returns true if the module is loaded, registered, or active.
-module_is_loaded :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> bool {
-	module, ok := module_registry_get(registry, handle)
-	if !ok do return false
-	switch module.state {
-	case .Loaded, .Registered, .Active:
-		return true
-	case .Unloaded, .Failed:
-		return false
-	}
-	return false
-}
-
-// module_is_active returns true if the module is active.
-module_is_active :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> bool {
-	module, ok := module_registry_get(registry, handle)
-	if !ok do return false
-	return module.state == Component_State.Active
-}
-
-// module_version returns the module's declared version.
-module_version :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> Version {
-	module, ok := module_registry_get(registry, handle)
-	if !ok do return Version{}
-	return module.descriptor.identity.version
-}
-
-// module_type returns the module's declared Lib_Type.
-module_type :: proc(registry: ^Module_Registry, handle: ModuleHandle) -> Lib_Type {
-	module, ok := module_registry_get(registry, handle)
-	if !ok do return Lib_Type.Other
-	return module.descriptor.identity.type
-}
-
-// module_find_by_type returns every currently-valid module of the requested
-// type. The returned collection is owned by the caller's allocator; this is
-// intentionally a copy because the registry's internal lookup array may
-// contain stale/invalid handles after module removal.
-module_find_by_type :: proc(
-	registry: ^Module_Registry,
-	lib_type: Lib_Type,
-	allocator: mem.Allocator,
-) -> [dynamic]ModuleHandle {
-	return module_collect_by_type(registry, lib_type, allocator)
-}
-
-// module_has_capability reports whether the module has the given capability
-// in its declared bit set.
-module_has_capability :: proc(
-	registry: ^Module_Registry,
-	handle: ModuleHandle,
-	capability: Component_Capability,
-) -> bool {
-	module, ok := module_registry_get(registry, handle)
-	if !ok do return false
-	return capability in module.descriptor.identity.capabilities
-}
+//
+// Module-side lookup helpers are defined in module_interface.odin so
+// they can be called from non-SDK code paths (scheduler_build, engine
+// init). The SDK exposes them transparently through Core's package
+// binding.
 
 // ============================================================================
 // EXTENSIONS
 // ============================================================================
 
 extension_find :: proc(registry: ^Extension_Registry, name: string) -> (ExtensionHandle, bool) {
-	if registry == nil || !registry.initialized do return INVALID_EXTENSION_HANDLE, false
-	if len(name) == 0 do return INVALID_EXTENSION_HANDLE, false
-
-	handle, found := registry.by_name[name]
-	if !found do return INVALID_EXTENSION_HANDLE, false
-	if !extension_is_valid(registry, handle) do return INVALID_EXTENSION_HANDLE, false
-	return handle, true
+	if registry == nil do return INVALID_EXTENSION_HANDLE, false
+	return component_lookup_by_name(cast(^Component_Registry)registry, name)
 }
 
 extension_is_loaded :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
-	extension, ok := extension_registry_get(registry, handle)
-	if !ok do return false
-
-	switch extension.state {
-	case .Loaded, .Registered, .Active: return true
-	case .Unloaded, .Failed:           return false
-	}
-	return false
+	if registry == nil do return false
+	return component_is_loaded(cast(^Component_Registry)registry, handle)
 }
 
 extension_is_active :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
-	extension, ok := extension_registry_get(registry, handle)
-	if !ok do return false
-	return extension.state == .Active
+	if registry == nil do return false
+	return component_is_active(cast(^Component_Registry)registry, handle)
 }
 
 extension_version :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> Version {
-	extension, ok := extension_registry_get(registry, handle)
+	ext, ok := component_registry_get(cast(^Component_Registry)registry, handle)
 	if !ok do return Version{}
-	return extension.api.identity.version
+	return ext.descriptor.version
 }
 
 // ============================================================================
@@ -201,32 +122,160 @@ event_find :: proc(registry: ^Event_Registry, name: string) -> (EventHandle, boo
 // ============================================================================
 // EVENTS
 // ============================================================================
-emit_event :: proc(event: rawptr)
+//
+// emit_event pushes an event payload onto the engine's event bus. The
+// bus itself is owned by a future module; until then this is a stub
+// that warns so missing-module bugs are obvious during development.
+emit_event :: proc(event: rawptr) {
+	_ = event
+	log.warn("[SDK] emit_event: event bus not implemented yet; event dropped.")
+}
 
 // ============================================================================
 // ASSETS
 // ============================================================================
-asset_load   :: proc(path: string) -> rawptr
-asset_unload :: proc(asset: rawptr)
+asset_load   :: proc(path: string) -> rawptr {
+	_ = path
+	log.warn("[SDK] asset_load: asset subsystem not implemented yet.")
+	return nil
+}
+asset_unload :: proc(asset: rawptr) {
+	_ = asset
+	log.warn("[SDK] asset_unload: asset subsystem not implemented yet.")
+}
+
+// ============================================================================
+// GAME-SIDE SYSTEM REGISTRATION
+// ============================================================================
+//
+// Game code (i.e. the application embedding the engine) registers systems
+// here during Engine_App_Interface.on_init. Modules register theirs through
+// their own `module_registration.add_system` path; the engine merges both
+// sources during scheduler_build.
+//
+// Game code MUST go through this SDK and MUST NOT import any module
+// package (BF_DAG, BF_ECS, Bifrost_Renderer, ...) directly. Module choice
+// for "the scheduler", "the ECS World", etc. is the engine's decision;
+// concrete services are still looked up by stable name by Core helpers
+// (e.g. engine_get_ecs_world) rather than by the application importing
+// BF_ECS.
+
+@(private)
+GLOBAL_GAME_SYSTEMS: [dynamic]System_Entry
+
+// Game-side dependency edges between named systems. Resolved to
+// System_Dependency (with numeric IDs) by scheduler_build.
+Game_System_Dependency :: struct {
+	before_name: string,
+	after_name:  string,
+}
+@(private)
+GLOBAL_GAME_DEPENDENCIES: [dynamic]Game_System_Dependency
+@(private)
+GLOBAL_GAME_REGISTRY_INITIALIZED: bool
+
+@(private)
+game_registry_init_if_needed :: proc() {
+	if GLOBAL_GAME_REGISTRY_INITIALIZED do return
+	GLOBAL_GAME_SYSTEMS = make([dynamic]System_Entry, context.allocator)
+	GLOBAL_GAME_DEPENDENCIES = make(
+		[dynamic]Game_System_Dependency,
+		context.allocator,
+	)
+	GLOBAL_GAME_REGISTRY_INITIALIZED = true
+}
+
+// engine_register_system adds a system to the game-side registry. The
+// engine merges this list into the Frame_DAG during scheduler_build.
+//
+// Returns false on duplicate name or nil callback. Game code is expected
+// to register all systems during Engine_App_Interface.on_init; runtime
+// registration (or recompilation of the DAG) is not supported in v1.
+engine_register_system :: proc(
+	name: string,
+	execute: proc(rawptr),
+	info: System_Info = {}, // defaults: stage=.Update, empty masks
+) -> bool {
+	game_registry_init_if_needed()
+	if execute == nil do return false
+	if len(name) == 0 do return false
+
+	// Reject duplicate game names so we get a clean DAG.
+	for s in GLOBAL_GAME_SYSTEMS {
+		if s.name == name {
+			log.warn("[SDK] engine_register_system: duplicate name '%s'", name)
+			return false
+		}
+	}
+
+	entry := System_Entry {
+		name     = name,
+		callback = execute,
+		info     = info,
+		id       = System_ID(u32(len(GLOBAL_GAME_SYSTEMS)) + 1),
+	}
+	append(&GLOBAL_GAME_SYSTEMS, entry)
+	return true
+}
+
+// engine_register_system_dependency adds an explicit before/after edge
+// between two game-registered systems. The IDs come back from
+// engine_register_system and are reassigned by the engine during the DAG
+// build; the engine resolves them by name at build time so callers don't
+// have to track the internal ID space.
+//
+// Module-side systems are not reachable from this entry point; modules
+// expose their own dependency mechanism via System_Info masks.
+engine_register_system_dependency :: proc(before_name, after_name: string) -> bool {
+	game_registry_init_if_needed()
+	dep := Game_System_Dependency{before_name = before_name, after_name = after_name}
+	append(&GLOBAL_GAME_DEPENDENCIES, dep)
+	return true
+}
 
 // ============================================================================
 // ECS
 // ============================================================================
-entity_create  :: proc() -> rawptr
-entity_destroy :: proc(entity: rawptr)
+//
+// entity_create / entity_destroy are owned by the BF_ECS module. Until
+// that module is loaded these stubs warn and return nil so a missing
+// dependency is obvious during development.
+entity_create :: proc() -> rawptr {
+	log.warn("[SDK] entity_create: BF_ECS not loaded.")
+	return nil
+}
+entity_destroy :: proc(entity: rawptr) {
+	_ = entity
+	log.warn("[SDK] entity_destroy: BF_ECS not loaded.")
+}
 
 // ============================================================================
 // RENDERING
 // ============================================================================
-renderer_begin_frame :: proc()
-renderer_end_frame   :: proc()
+//
+// Renderers register Submit / Present as DAG systems with stage
+// .Render / .PostRender rather than going through these procs. These
+// stubs remain so legacy code keeps linking; new code should register
+// systems via engine_register_system instead.
+renderer_begin_frame :: proc() {
+	log.warn("[SDK] renderer_begin_frame: deprecated. Register a .PreRender system instead.")
+}
+renderer_end_frame :: proc() {
+	log.warn("[SDK] renderer_end_frame: deprecated. Register a .PostRender system instead.")
+}
 
 // ============================================================================
 // AUDIO
 // ============================================================================
-audio_play :: proc(sound: rawptr)
+audio_play :: proc(sound: rawptr) {
+	_ = sound
+	log.warn("[SDK] audio_play: audio module not loaded.")
+}
 
 // ============================================================================
 // PHYSICS
 // ============================================================================
-physics_raycast :: proc() -> bool
+physics_raycast :: proc() -> bool {
+	log.warn("[SDK] physics_raycast: physics module not loaded.")
+	return false
+}

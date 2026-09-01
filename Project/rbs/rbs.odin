@@ -67,6 +67,14 @@ DEBUG_OUTPUT_PATH   :: "../bin/Debug"
 EDITOR_OUTPUT_PATH  :: "../bin/Editor"
 RELEASE_OUTPUT_PATH :: "../bin/Release"
 
+// Stable, filename-safe identifiers used for profile-aware switches below.
+// The executable output name (`Profile.name`) is built from `project_name`
+// and may contain spaces; use these constants when matching a profile by
+// identity instead of by display name.
+DEBUG_NAME   :: "Debug"
+EDITOR_NAME  :: "Editor"
+RELEASE_NAME :: "Release"
+
 ConfigState :: enum {
 	None, // none found, continue and lets the engine create one
 	Failed,
@@ -529,9 +537,9 @@ EDITOR_MODULE_NAME :: "BF_Editor"
 //   - If the module is the Editor and the profile is not the editor build,
 //     skip it. The Editor DLL only ships with the editor executable.
 //
-should_build_module :: proc(name: string, enabled: bool, profile_name: string) -> bool {
+should_build_module :: proc(name: string, enabled: bool, profile_output: string) -> bool {
 	if !enabled do return false
-	if name == EDITOR_MODULE_NAME && profile_name != "Project-Editor" do return false
+	if name == EDITOR_MODULE_NAME && profile_output != EDITOR_OUTPUT_PATH do return false
 	return true
 }
 
@@ -546,7 +554,7 @@ build_modules :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
 	fmt.println("==================================================")
 
 	for m in settings.modules {
-		if !should_build_module(m.name, m.enabled, profile.name) do continue
+		if !should_build_module(m.name, m.enabled, profile.output) do continue
 		build_module(m.name, profile)
 	}
 }
@@ -840,18 +848,18 @@ pre_build_release :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 // ============================================================================
 
 pre_build :: proc(ctx: rbs.Context, profile: rbs.Profile) {
-	switch profile.name {
-	case "Project-Debug":
+	switch profile.output {
+	case DEBUG_OUTPUT_PATH:
 		pre_build_debug(ctx, profile)
 
-	case "Project-Editor":
+	case EDITOR_OUTPUT_PATH:
 		pre_build_editor(ctx, profile)
 
-	case "Project":
+	case RELEASE_OUTPUT_PATH:
 		pre_build_release(ctx, profile)
 
 	case:
-		fatal(fmt.aprintf("ERROR: Unknown build profile: %s", profile.name))
+		fatal(fmt.aprintf("ERROR: Unknown build profile: %s", profile.output))
 	}
 }
 
@@ -919,7 +927,7 @@ main :: proc() {
 			entry = "..",
 			flags = "-vet -debug",
 			mode = .Executable,
-			name = "Project-Debug",
+			name = fmt.aprintf("%s - Debug", project_config.project_name),   
 			output = DEBUG_OUTPUT_PATH,
 			arch = ODIN_ARCH,
 			os = ODIN_OS,
@@ -937,7 +945,7 @@ main :: proc() {
 			entry = "..",
 			flags = "-vet -debug -define:RUN_EDITOR=true",
 			mode = .Executable,
-			name = "Project-Editor",
+			name = fmt.aprintf("%s - Editor", project_config.project_name),
 			output = EDITOR_OUTPUT_PATH,
 			arch = ODIN_ARCH,
 			os = ODIN_OS,
@@ -955,7 +963,7 @@ main :: proc() {
 			entry = "..",
 			flags = "-vet -release",
 			mode = .Executable,
-			name = "Project",
+			name = project_config.project_name,
 			output = RELEASE_OUTPUT_PATH,
 			arch = ODIN_ARCH,
 			os = ODIN_OS,

@@ -1,22 +1,34 @@
 // Engine\src\Core\engine.odin
+//
+// Engine entry points. Lifecycle (init / run / destroy) and the
+// scheduler wiring. The bulk of the manager code now lives in
+// component.odin (unified Module/Extension/Plugin).
 package Core
 
 import "core:fmt"
 import "core:log"
+import "core:mem"
+import "core:time"
 
-// The engine owns one manager per component type. Modules/Extensions/Plugins
-// all use the same Loaded_Lib + Lib_Context pipeline; they differ only in
-// the manager that drives their lifecycle.
+import hm "core:container/handle_map"
 
-// Global managers (engine-owned singletons).
-// These are package-internal — only the engine, managers, and the SDK can
-// touch them. Components MUST go through the SDK rather than reading these directly.
+// ============================================================================
+// GLOBAL REGISTRIES / MANAGERS
+// ============================================================================
+//
+// Engine-owned singletons. All manager init/destroy is driven from
+// engine.init / engine.destroy in this file.
+//
+// Module / Extension / Plugin managers are Component_Managers tagged
+// with their kind at init time. Service/Resource/Event registries are
+// separate types; the rollback helpers below reinterpret a
+// Component_Manager pointer so we can store all six globals uniformly.
 @(private)
-GLOBAL_MODULE_MANAGER:    Module_Manager
+GLOBAL_MODULE_MANAGER:    Component_Manager
 @(private)
-GLOBAL_EXTENSION_MANAGER: Extension_Manager
+GLOBAL_EXTENSION_MANAGER: Component_Manager
 @(private)
-GLOBAL_PLUGIN_MANAGER:    Plugin_Manager
+GLOBAL_PLUGIN_MANAGER:    Component_Manager
 @(private)
 GLOBAL_SERVICE_REGISTRY:  Service_Registry
 @(private)
@@ -24,83 +36,264 @@ GLOBAL_RESOURCE_REGISTRY: Resource_Registry
 @(private)
 GLOBAL_EVENT_REGISTRY:    Event_Registry
 
-// RUN_EDITOR is set by init when the engine is launched with RUN_EDITOR=true.
-// The editor module and a few capability checks read it; treat it as
-// read-only from outside engine.init.
+// Rollback_Op is the entry pushed onto engine.init's rollback stack
+// when a subsystem successfully starts. On failure, the deferred
+// rollback drains the stack in reverse order.
+Rollback_Op :: struct {
+	kind:   registry_kind,
+	target: rawptr,
+}
+
+// Engine_App_Interface is the application's hook surface.
+Engine_App_Interface :: struct {
+	on_init:     proc(), // Called after modules are activated and the empty DAG is built.
+	on_pre_tick: proc(dt: f32, frame_index: u64), // Game intent at the top of each frame.
+	on_present:  proc(dt: f32, frame_index: u64), // Present / swap after the DAG finishes.
+	on_shutdown: proc(), // Once, at the end of engine.destroy, before scheduler teardown.
+}
+
+@(private)
+GLOBAL_APP_INTERFACE: ^Engine_App_Interface
+
 RUN_EDITOR: bool = false
+ENGINE_RUNNING: bool = false
 
-// APPRUNHANDLE is the user's main-loop callback invoked from run().
-APPRUNHANDLE: proc()
+// =============================================================================
+// LIFECYCLE INIT (defer-based rollback on partial failure)
+// =============================================================================
 
-// ENGINE INIT
-init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
+init :: proc(app: ^Engine_App_Interface, run_editor: bool) -> bool {
 	context.logger = log.create_console_logger()
 	inject_default_project_settings()
 
 	RUN_EDITOR = run_editor
-	APPRUNHANDLE = apprunhandle
+	GLOBAL_APP_INTERFACE = app
 
 	fmt.println("")
 	fmt.println("========================================")
 	fmt.println(" ENGINE INIT")
 	fmt.println("========================================")
 
+	// Track which subsystems have started so we can roll back on
+	// partial failure. Each successful step pushes a Rollback_Op
+	// onto `rollback`. The final init returns true if everything
+	// succeeded; on failure the deferred rollback drains the stack
+	// in reverse order.
+	rollback := make([dynamic]Rollback_Op, 0, context.allocator)
+	defer {
+		if !ENGINE_RUNNING {
+			for i := len(rollback) - 1; i >= 0; i -= 1 {
+				op := rollback[i]
+				switch op.kind {
+				case .RK_Module, .RK_Extension, .RK_Plugin:
+					component_manager_destroy(cast(^Component_Manager)op.target)
+				case .RK_Service:
+					service_registry_destroy(cast(^Service_Registry)op.target)
+				case .RK_Resource:
+					resource_registry_destroy(cast(^Resource_Registry)op.target)
+				case .RK_Event:
+					event_registry_destroy(cast(^Event_Registry)op.target)
+				}
+			}
+		}
+		delete(rollback)
+	}
+
 	// Project Settings (TOML).
 	if !load_project_settings_toml() {
 		setup_default_project_settings_toml()
 	}
 
-	// Init managers.
-	if !module_manager_init(&GLOBAL_MODULE_MANAGER, context.allocator) do return false
-	if !extension_manager_init(&GLOBAL_EXTENSION_MANAGER, context.allocator) do return false
-	if !plugin_manager_init(&GLOBAL_PLUGIN_MANAGER, context.allocator) do return false
-	if !service_registry_init(&GLOBAL_SERVICE_REGISTRY, context.allocator) do return false
-	if !resource_registry_init(&GLOBAL_RESOURCE_REGISTRY, context.allocator) do return false
-	if !event_registry_init(&GLOBAL_EVENT_REGISTRY, context.allocator) do return false
+	// Singletons: init in dependency order. Each subsystem registers
+	// its rollback op on failure.
+	if !registry_init_with_rollback(&rollback, rawptr(&GLOBAL_MODULE_MANAGER), context.allocator, .RK_Module) do return false
+	if !registry_init_with_rollback(&rollback, rawptr(&GLOBAL_EXTENSION_MANAGER), context.allocator, .RK_Extension) do return false
+	if !registry_init_with_rollback(&rollback, rawptr(&GLOBAL_PLUGIN_MANAGER), context.allocator, .RK_Plugin) do return false
+	if !registry_init_with_rollback(&rollback, rawptr(&GLOBAL_SERVICE_REGISTRY), context.allocator, .RK_Service) do return false
+	if !registry_init_with_rollback(&rollback, rawptr(&GLOBAL_RESOURCE_REGISTRY), context.allocator, .RK_Resource) do return false
+	if !registry_init_with_rollback(&rollback, rawptr(&GLOBAL_EVENT_REGISTRY), context.allocator, .RK_Event) do return false
 
 	// MODULES
-	if !module_manager_load_project(&GLOBAL_MODULE_MANAGER) do return false
-	if !module_manager_resolve(&GLOBAL_MODULE_MANAGER) do return false
-	if !module_manager_activate_all(&GLOBAL_MODULE_MANAGER) do return false
+	if !component_manager_load_project(&GLOBAL_MODULE_MANAGER, GLOBAL_PROJECT_SETTINGS.modules) do return false
+	if !component_manager_resolve(&GLOBAL_MODULE_MANAGER) do return false
+	if !component_manager_activate_all(&GLOBAL_MODULE_MANAGER) do return false
 
 	// EXTENSIONS
-	if !extension_manager_load_project(&GLOBAL_EXTENSION_MANAGER) do return false
-	if !extension_manager_resolve(&GLOBAL_EXTENSION_MANAGER) do return false
-	if !extension_manager_register_all(&GLOBAL_EXTENSION_MANAGER) do return false
-	if !extension_manager_activate_all(&GLOBAL_EXTENSION_MANAGER) do return false
+	if !component_manager_load_project(&GLOBAL_EXTENSION_MANAGER, GLOBAL_PROJECT_SETTINGS.extensions) do return false
+	if !component_manager_resolve(&GLOBAL_EXTENSION_MANAGER) do return false
+	if !component_manager_activate_all(&GLOBAL_EXTENSION_MANAGER) do return false
 
 	// PLUGINS
-	if !plugin_manager_load_project(&GLOBAL_PLUGIN_MANAGER) do return false
-	if !plugin_manager_register_all(&GLOBAL_PLUGIN_MANAGER) do return false
-	if !plugin_manager_activate_all(&GLOBAL_PLUGIN_MANAGER) do return false
+	if !component_manager_load_project(&GLOBAL_PLUGIN_MANAGER, GLOBAL_PROJECT_SETTINGS.plugins) do return false
+	if !component_manager_resolve(&GLOBAL_PLUGIN_MANAGER) do return false
+	if !component_manager_activate_all(&GLOBAL_PLUGIN_MANAGER) do return false
 
-	// Build engine scheduling after all systems have registered
+	// Game registration before DAG compile.
+	if app != nil && app.on_init != nil {
+		log.info("[Engine] Engine_App_Interface.on_init()")
+		app.on_init()
+	}
+
+	// Populate the Scheduler_Frame.world handle now that we know which
+	// modules are active. Done lazily — we don't require BF_ECS.
+	if world_raw := engine_get_ecs_world(); world_raw != nil {
+		engine_world_handle = World_Handle{ptr = world_raw}
+	}
+	// engine_self_handle is a sentinel pointing at ENGINE_RUNNING.
+	// Future code can dereference this through a typed wrapper if
+	// it needs to recover engine state from a system callback.
+	engine_self_handle = Engine_Handle{ptr = rawptr(&ENGINE_RUNNING)}
+
+	// Build the DAG and start the worker pool.
 	if !scheduler_build() do return false
+	if !scheduler_start_workers() do return false
 
 	fmt.println("")
 	fmt.println("Engine initialization complete.")
+	ENGINE_RUNNING = true
 	return true
 }
 
-// ENGINE RUN
+// registry_kind is a tag for the four kinds of subsystem init paths.
+// Distinct from Component_Kind so the names don't shadow the manager
+// types.
+registry_kind :: enum {
+	RK_Module,
+	RK_Extension,
+	RK_Plugin,
+	RK_Service,
+	RK_Resource,
+	RK_Event,
+}
+
+registry_init_with_rollback :: proc(
+	rollback: ^[dynamic]Rollback_Op,
+	target: rawptr,
+	allocator: mem.Allocator,
+	kind: registry_kind,
+) -> bool {
+	ok := false
+	switch kind {
+	case .RK_Module:
+		cm := cast(^Component_Manager)target
+		ok = component_manager_init(cm, allocator, .Module)
+	case .RK_Extension:
+		cm := cast(^Component_Manager)target
+		ok = component_manager_init(cm, allocator, .Extension)
+	case .RK_Plugin:
+		cm := cast(^Component_Manager)target
+		ok = component_manager_init(cm, allocator, .Plugin)
+	case .RK_Service:
+		sr := cast(^Service_Registry)target
+		ok = service_registry_init(sr, allocator)
+	case .RK_Resource:
+		rr := cast(^Resource_Registry)target
+		ok = resource_registry_init(rr, allocator)
+	case .RK_Event:
+		er := cast(^Event_Registry)target
+		ok = event_registry_init(er, allocator)
+	}
+	if !ok do return false
+	append(rollback, Rollback_Op{kind = kind, target = target})
+	return true
+}
+
+// (mgr_*_to_registry helpers removed — registry_init_with_rollback
+// now accepts rawptr and casts at the call site.)
+
+// =============================================================================
+// ENGINE QUIT
+// =============================================================================
+
+engine_quit :: proc() {
+	ENGINE_RUNNING = false
+}
+
+// =============================================================================
+// ENGINE RUN — frame loop driver
+// =============================================================================
+
 run :: proc() {
 	fmt.println("")
 	fmt.println("========================================")
 	fmt.println(" ENGINE RUN")
 	fmt.println("========================================")
 
-	fmt.println("ENGINE RUN ENTERED")
+	if GLOBAL_SCHEDULER_SERVICE == nil {
+		fmt.println("[Engine] No scheduler service; running on_pre_tick / on_present only.")
+	}
 
-	if APPRUNHANDLE != nil {
-		fmt.println("Calling application callback...")
-		APPRUNHANDLE()
-		fmt.println("Application callback returned.")
+	// High-resolution timer for dt. time.tick_now() is monotonic.
+	last_tick := time.tick_now()
+
+	frame_index: u64 = 0
+
+	// ENGINE_MAX_DT_S clamp prevents spiral-of-death after a hitch.
+	ENGINE_MAX_DT_S :: f32(1.0 / 30.0)
+
+	// First-frame dt spike guard. Seed last_tick at the top of the
+	// first iteration so the first dt only measures time since init.
+	first_frame := true
+
+	for ENGINE_RUNNING {
+		now_tick := time.tick_now()
+		if first_frame {
+			last_tick = now_tick
+			first_frame = false
+		}
+		d := time.tick_diff(last_tick, now_tick)
+		last_tick = now_tick
+
+		dt := f32(time.duration_seconds(d))
+		if dt > ENGINE_MAX_DT_S do dt = ENGINE_MAX_DT_S
+		if dt < 0 do dt = 0
+
+		frame := Scheduler_Frame {
+			world       = engine_world_handle,
+			engine      = engine_self_handle,
+			dt          = dt,
+			frame_index = frame_index,
+		}
+
+		// 1. Begin frame — resets per-frame scheduler state, enqueues
+		//    root nodes, computes frame budget.
+		if GLOBAL_SCHEDULER_SERVICE != nil {
+			GLOBAL_SCHEDULER_SERVICE.begin_frame(GLOBAL_SCHEDULER_SERVICE, rawptr(&frame))
+		}
+
+		// 2. Game intent — single-threaded, before any worker starts.
+		if GLOBAL_APP_INTERFACE != nil && GLOBAL_APP_INTERFACE.on_pre_tick != nil {
+			GLOBAL_APP_INTERFACE.on_pre_tick(dt, frame_index)
+		}
+
+		// 3. Drive DAG on the main thread.
+		if GLOBAL_SCHEDULER_SERVICE != nil {
+			GLOBAL_SCHEDULER_SERVICE.run(GLOBAL_SCHEDULER_SERVICE)
+		}
+
+		// 4. Block until every worker drained (lock-free via frame_gen).
+		if GLOBAL_SCHEDULER_SERVICE != nil {
+			GLOBAL_SCHEDULER_SERVICE.wait(GLOBAL_SCHEDULER_SERVICE)
+		}
+
+		// 5. Present / swap. Runs on the main thread AFTER the DAG
+		//    finishes; renderers register their Submit work in the
+		//    .Render stage of the DAG, so by the time we get here the
+		//    command buffers are recorded but not yet presented.
+		if GLOBAL_APP_INTERFACE != nil && GLOBAL_APP_INTERFACE.on_present != nil {
+			GLOBAL_APP_INTERFACE.on_present(dt, frame_index)
+		}
+
+		frame_index += 1
 	}
 
 	fmt.println("ENGINE RUN EXITED")
 }
 
+// =============================================================================
 // ENGINE DESTROY
+// =============================================================================
+
 destroy :: proc() -> bool {
 	cleanup_project_settings(project_settings_get())
 	fmt.println("")
@@ -108,52 +301,196 @@ destroy :: proc() -> bool {
 	fmt.println(" ENGINE DESTROY")
 	fmt.println("========================================")
 
-	// DEACTIVATE (reverse order)
-	plugin_manager_deactivate_all(&GLOBAL_PLUGIN_MANAGER)
-	extension_manager_deactivate_all(&GLOBAL_EXTENSION_MANAGER)
-	module_manager_deactivate_all(&GLOBAL_MODULE_MANAGER)
+	ENGINE_RUNNING = false
+
+	if GLOBAL_APP_INTERFACE != nil && GLOBAL_APP_INTERFACE.on_shutdown != nil {
+		log.info("[Engine] Engine_App_Interface.on_shutdown()")
+		GLOBAL_APP_INTERFACE.on_shutdown()
+	}
+
+	// Reverse-order teardown.
+	component_manager_deactivate_all(&GLOBAL_PLUGIN_MANAGER)
+	component_manager_deactivate_all(&GLOBAL_EXTENSION_MANAGER)
+	component_manager_deactivate_all(&GLOBAL_MODULE_MANAGER)
 
 	scheduler_shutdown()
 
-	// UNLOAD modules FIRST — this drains their services / resources /
-	// events out of the global registries and calls each instance's
-	// destroy() exactly once. Only after that is it safe to destroy
-	// the registries themselves; otherwise the registries' defensive
-	// destroy() would double-free the same instances.
-	module_manager_unload_all(&GLOBAL_MODULE_MANAGER)
-
-	plugin_manager_unload_all(&GLOBAL_PLUGIN_MANAGER)
-	plugin_manager_destroy(&GLOBAL_PLUGIN_MANAGER)
-
-	extension_manager_unload_all(&GLOBAL_EXTENSION_MANAGER)
-	extension_manager_destroy(&GLOBAL_EXTENSION_MANAGER)
+	// UNLOAD modules FIRST — drains their services/resources/events
+	// out of the global registries and calls each instance's destroy()
+	// exactly once.
+	component_manager_unload_all(&GLOBAL_MODULE_MANAGER)
+	component_manager_unload_all(&GLOBAL_PLUGIN_MANAGER)
+	component_manager_unload_all(&GLOBAL_EXTENSION_MANAGER)
 
 	event_registry_destroy(&GLOBAL_EVENT_REGISTRY)
 	resource_registry_destroy(&GLOBAL_RESOURCE_REGISTRY)
 	service_registry_destroy(&GLOBAL_SERVICE_REGISTRY)
 
-	module_manager_destroy(&GLOBAL_MODULE_MANAGER)
+	component_manager_destroy(&GLOBAL_MODULE_MANAGER)
+	component_manager_destroy(&GLOBAL_EXTENSION_MANAGER)
+	component_manager_destroy(&GLOBAL_PLUGIN_MANAGER)
 
-	APPRUNHANDLE = nil
+	engine_world_handle = {}
+	engine_self_handle = {}
+	GLOBAL_APP_INTERFACE = nil
 
 	log.destroy_console_logger(context.logger)
-
 	return true
 }
 
+// =============================================================================
+// SCHEDULER WIRING
+// =============================================================================
 
-// scheduler_build / scheduler_shutdown are placeholders so engine.odin
-// compiles standalone. Once the BF_DAG scheduler module is wired in, these
-// will either delegate into the DAG service (preferred) or be removed in
-// favour of an explicit scheduler service handle.
+GLOBAL_SCHEDULER_SERVICE: ^Scheduler_Service
+
+SCHEDULER_SERVICE_NAME_INTERNAL :: "BF_DAG.Scheduler"
+
 @(private)
+engine_world_handle: World_Handle
+@(private)
+engine_self_handle: Engine_Handle
+
 scheduler_build :: proc() -> bool {
-	log.warn("Scheduler build not implemented - scheduler not hooked up yet")
+	handle, ok := service_find(&GLOBAL_SERVICE_REGISTRY, SCHEDULER_SERVICE_NAME_INTERNAL)
+	if !ok {
+		log.warn("[Scheduler] BF_DAG.Scheduler service not registered — running without a scheduler.")
+		return true
+	}
+
+	instance := service_get(&GLOBAL_SERVICE_REGISTRY, handle)
+	if instance == nil {
+		log.error("[Scheduler] BF_DAG.Scheduler service instance is nil.")
+		return false
+	}
+
+	service := cast(^Scheduler_Service)instance
+	GLOBAL_SCHEDULER_SERVICE = service
+
+	game_registry_init_if_needed()
+	game_systems := GLOBAL_GAME_SYSTEMS[:]
+	game_total := len(game_systems)
+
+	module_total := 0
+	registry := &GLOBAL_MODULE_MANAGER.registry
+	it_count := hm.dynamic_iterator_make(&registry.slots)
+	for module, _ in hm.iterate(&it_count) {
+		module_total += len(module.registration.systems)
+	}
+
+	total := game_total + module_total
+	if total == 0 {
+		log.info("[Scheduler] No systems registered.")
+		return true
+	}
+
+	next_id: u32 = 1
+
+	// Combined view of every system (game + module). Both contribute
+	// to the same DAG so cross-source deps resolve by name.
+	combined := make([dynamic]System_Entry, total, context.allocator)
+	defer delete(combined)
+
+	// Track name -> index in `combined` for dep resolution below.
+	name_index := make(map[string]int, total, context.allocator)
+	defer delete(name_index)
+
+	// Game systems first.
+	for &sys, _ in game_systems {
+		sys.id = System_ID(next_id)
+		combined[next_id - 1] = sys
+		name_index[sys.name] = int(next_id - 1)
+		next_id += 1
+	}
+
+	// Module systems. Thread the module-supplied System_Info through;
+	// default the stage to .Update if the module didn't specify one.
+	it_collect := hm.dynamic_iterator_make(&registry.slots)
+	for module, _ in hm.iterate(&it_collect) {
+		for reg_sys in module.registration.systems {
+			id := System_ID(next_id)
+			info := reg_sys.info
+			if info.stage == System_Stage.PreStartup && reg_sys.execute != nil {
+				// Module-supplied info wins; default stage is .Update.
+				if reg_sys.flags != 0 do info.flags = reg_sys.flags
+			}
+			entry := System_Entry {
+				name     = reg_sys.name,
+				callback = reg_sys.execute,
+				info     = info,
+				id       = id,
+			}
+			combined[next_id - 1] = entry
+			name_index[reg_sys.name] = int(next_id - 1)
+			next_id += 1
+		}
+	}
+
+	// Game-side deps + any module-side deps registered through
+	// module dependencies array (extensions of System_Info to come).
+	deps := make([dynamic]System_Dependency, len(GLOBAL_GAME_DEPENDENCIES), context.allocator)
+	defer delete(deps)
+
+	for dep in GLOBAL_GAME_DEPENDENCIES {
+		before_idx, ok1 := name_index[dep.before_name]
+		after_idx,  ok2 := name_index[dep.after_name]
+		if !ok1 || !ok2 {
+			log.warnf(
+				"[Scheduler] dropping unresolved dependency '%s' -> '%s'",
+				dep.before_name,
+				dep.after_name,
+			)
+			continue
+		}
+		append(&deps, System_Dependency{
+			before = combined[before_idx].id,
+			after  = combined[after_idx].id,
+		})
+	}
+
+	systems_ptr := rawptr(&combined[0]) if len(combined) > 0 else nil
+	deps_ptr    := rawptr(&deps[0])    if len(deps)    > 0 else nil
+
+	ok_build := service.build(
+		service,
+		systems_ptr,
+		len(combined),
+		deps_ptr,
+		len(deps),
+		context.allocator,
+	)
+
+	if !ok_build {
+		log.error("[Scheduler] BF_DAG build failed.")
+		return false
+	}
+
+	log.infof(
+		"[Scheduler] BF_DAG compiled %d systems (%d game + %d module).",
+		total, game_total, module_total,
+	)
 	return true
 }
 
-@(private)
-scheduler_shutdown :: proc() -> bool {
-	log.warn("Scheduler shutdown not implemented - scheduler not hooked up yet")
+scheduler_start_workers :: proc() -> bool {
+	if GLOBAL_SCHEDULER_SERVICE == nil do return true
+	GLOBAL_SCHEDULER_SERVICE.start_workers(GLOBAL_SCHEDULER_SERVICE)
 	return true
+}
+
+scheduler_shutdown :: proc() {
+	if GLOBAL_SCHEDULER_SERVICE == nil {
+		return
+	}
+	GLOBAL_SCHEDULER_SERVICE = nil
+}
+
+engine_scheduler_get :: proc() -> ^Scheduler_Service {
+	return GLOBAL_SCHEDULER_SERVICE
+}
+
+engine_get_ecs_world :: proc() -> rawptr {
+	handle, ok := service_find(&GLOBAL_SERVICE_REGISTRY, "BF_ECS.World")
+	if !ok do return nil
+	return service_get(&GLOBAL_SERVICE_REGISTRY, handle)
 }

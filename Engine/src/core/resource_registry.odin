@@ -22,7 +22,7 @@ import hm "core:container/handle_map"
 @(private)
 Resource_Instance :: struct {
 	handle:   ResourceHandle,
-	owner:    ModuleHandle,
+	owner:    ComponentHandle,
 	name:     string,
 	instance: rawptr,
 	destroy:  proc(instance: rawptr),
@@ -87,7 +87,7 @@ resource_registry_get :: proc(
 @(private)
 resource_register :: proc(
 	registry: ^Resource_Registry,
-	owner: ModuleHandle,
+	owner: ComponentHandle,
 	registration: Resource_Registration,
 ) -> (
 	ResourceHandle,
@@ -159,7 +159,7 @@ resource_unregister :: proc(registry: ^Resource_Registry, handle: ResourceHandle
 @(private)
 resource_unregister_all_owned :: proc(
 	registry: ^Resource_Registry,
-	owner: ModuleHandle,
+	owner: ComponentHandle,
 ) -> int {
 	if registry == nil || !registry.initialized do return 0
 

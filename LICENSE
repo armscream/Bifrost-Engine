@@ -1,0 +1,145 @@
+# BIFROST ENGINE LICENSE SELECTION AGREEMENT (LSA)
+
+Version 1.0
+
+Copyright © Calvin Vandenberg CD ("Armscream") All Rights Reserved.
+
+## 1. Purpose
+
+This License Selection Agreement ("LSA") governs access to and use of the Bifrost Engine ("Engine").
+
+Any person or entity obtaining, using, modifying, compiling, distributing, or creating works based upon the Engine must elect and comply with exactly one of the following licenses for each Project:
+
+1. Commercial Engine License ("CEL")
+2. Open Community Game License ("OCGL")
+
+No Project may simultaneously operate under both licenses.
+
+## 2. Definitions
+
+### 2.1 Engine
+
+"Engine" means the Bifrost Engine software, source code, tools, libraries, build systems, documentation, examples, official plugins, official extensions, and all associated materials distributed by the Engine Publisher.
+
+### 2.2 Engine Publisher
+
+"Engine Publisher" means Calvin Vandenberg C.D., successors, assigns, or any entity designated by the Engine Publisher.
+
+### 2.3 Project
+
+"Project" means any game, application, simulation, tool, product, or derivative work developed using any portion of the Engine.
+
+### 2.4 Public Release
+
+"Public Release" means any distribution of a Project to any person outside the development team, including:
+
+* Alpha releases
+* Beta releases
+* Early Access releases
+* Demonstrations
+* Public test builds
+* Commercial releases
+* Free releases
+
+### 2.5 Patch
+
+"Patch" means instructions, diffs, source modifications, or transformation data necessary to modify an official Engine release.
+
+A Patch must not constitute a complete or substantially complete redistribution of Engine Source Code.
+
+### 2.6 Plugin
+
+"Plugin" means software that extends Engine functionality through published APIs without modifying Engine Source Code.
+
+### 2.7 Extension
+
+"Extension" means software that extends Engine functionality and may require Engine Patches to operate.
+
+### 2.8 Fork
+
+"Fork" means any redistributed version of the Engine containing modified Engine Source Code.
+
+## 3. License Election
+
+Prior to any Public Release, the Project owner must elect either:
+
+A. Commercial Engine License (CEL)
+
+or
+
+B. Open Community Game License (OCGL)
+
+The selected license governs the entire Project.
+
+## 4. Irrevocability of Election
+
+Projects released under the OCGL may not subsequently be relicensed under the CEL or any other license permitting commercialization.
+
+Projects released under the CEL may not subsequently claim OCGL status for prior proprietary releases.
+
+## 5. Single Canonical Engine
+
+The Engine Publisher maintains the sole official Engine distribution.
+
+Users may:
+
+* Create Plugins and distribute them.
+* Create Extensions and distribute them.
+* Create Patches and distribute them.
+* Submit Contributions.
+
+Users may not:
+
+* Publish Forks.
+* Redistribute modified Engine Source Code.
+* Distribute alternative Engine distributions.
+
+## 6. Contributions
+
+Contributors retain ownership of their Contributions.
+
+By submitting a Contribution to the Engine, the Contributor grants the Engine Publisher a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to:
+
+* Use
+* Modify
+* Reproduce
+* Distribute
+* Sublicense
+* Relicense
+* Incorporate
+
+the Contribution into the Engine and any future version of the Engine.
+
+Contributors may continue to use, license, sell, distribute, or otherwise exploit their Contributions outside of the Engine under any terms they choose.
+
+Contributions may not be withdrawn after acceptance.
+
+Submission of a Contribution grants no governance, ownership, veto, approval, or control rights over the Engine.
+
+## 7. Attribution
+
+All Projects developed using the Engine shall display:
+
+1. The official Bifrost Engine logo during startup.
+2. A copyright notice identifying the Engine.
+3. Attribution in Project credits.
+
+Specific attribution requirements are defined in the selected license.
+
+## 8. Reservation of Rights
+
+All rights not expressly granted are reserved by the Engine Publisher.
+
+The Engine Publisher retains the unrestricted right to:
+
+* Relicense the Engine.
+* Offer custom licenses.
+* Grant exceptions.
+* Enter commercial agreements.
+* Modify future license versions.
+
+## 9. Acceptance
+
+By obtaining, using, modifying, compiling, or distributing the Engine, the User agrees to the terms of this Agreement and the selected governing license.
+
+END OF LICENSE SELECTION AGREEMENT

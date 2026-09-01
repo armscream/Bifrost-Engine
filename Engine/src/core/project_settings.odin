@@ -22,13 +22,28 @@ import ts "../ext/toml_serializer"
 // In-process, read-only data; not behind any ABI.
 // ============================================================================
 
-Quantization_Level :: enum { U8, U16, F32 }
+Quantization_Level :: enum {
+	U8,
+	U16,
+	F32,
+}
 
-Index_Buffer_Format :: enum { U16, U32 }
+Index_Buffer_Format :: enum {
+	U16,
+	U32,
+}
 
-Texture_Compression_Format :: enum { None, BC, ASTC, ETC2 }
+Texture_Compression_Format :: enum {
+	None,
+	BC,
+	ASTC,
+	ETC2,
+}
 
-Colour_Space :: enum { Linear, sRGB }
+Colour_Space :: enum {
+	Linear,
+	sRGB,
+}
 
 Mesh_Optimization :: struct {
 	vertex_cache_reordering: bool,
@@ -49,23 +64,30 @@ Animation_Quantization :: struct {
 
 Renderer_Settings :: struct {
 	// --- Texture import ---
-	texture_compression: Texture_Compression_Format,
-	generate_mips:       bool,
-	max_texture_size:    u32,
-	colour_space:        Colour_Space,
+	texture_compression:    Texture_Compression_Format,
+	generate_mips:          bool,
+	max_texture_size:       u32,
+	colour_space:           Colour_Space,
 
 	// --- Mesh / geometry ---
-	mesh_optimization:   Mesh_Optimization,
-	lod_count:           u32,
-	lod_simplification:  f32,
-	oct_encoded_normals: bool,
-	vertex_quantization: Vertex_Quantization,
-	index_buffer_format: Index_Buffer_Format,
+	mesh_optimization:      Mesh_Optimization,
+	lod_count:              u32,
+	lod_simplification:     f32,
+	oct_encoded_normals:    bool,
+	vertex_quantization:    Vertex_Quantization,
+	index_buffer_format:    Index_Buffer_Format,
 
 	// --- Animation ---
 	animation_quantization: Animation_Quantization,
-	bone_weight_format:      Quantization_Level,
+	bone_weight_format:     Quantization_Level,
 }
+
+Spatial_Settings :: struct {
+	cubic:      bool, // true = 3D, false = 2D (square).
+	chunk_size: u32, // cells per chunk axis
+	cell_size:  f32, // world meters per cell
+}
+
 
 // ============================================================================
 // PROJECT SETTINGS (TOML)
@@ -74,14 +96,18 @@ Project_Settings :: struct {
 	project_name:      string,
 	version:           Version,
 	renderer_settings: Renderer_Settings,
-	modules:           [dynamic]Project_Module,
-	extensions:        [dynamic]Project_Extension,
-	plugins:           [dynamic]Project_Plugin,
+	spatial_settings:  Spatial_Settings,
+	modules:           [dynamic]Component_Project_Entry,
+	extensions:        [dynamic]Component_Project_Entry,
+	plugins:           [dynamic]Component_Project_Entry,
 }
 
-Project_Module    :: struct { name: string, version: Version, enabled: bool, required: bool }
-Project_Extension :: struct { name: string, version: Version, enabled: bool, required: bool }
-Project_Plugin    :: struct { name: string, version: Version, enabled: bool, required: bool }
+// Project_Module / Project_Extension / Project_Plugin are now
+// Component_Project_Entry under the hood. Kept as type aliases so
+// any existing call sites that named the old types still compile.
+Project_Module    :: Component_Project_Entry
+Project_Extension :: Component_Project_Entry
+Project_Plugin    :: Component_Project_Entry
 // ===============================
 // GLOBAL STATE
 //
@@ -128,7 +154,11 @@ renderer_settings_get :: proc() -> ^Renderer_Settings {
 // pointer was malformed).
 renderer_settings_from_lib :: proc(lib_ctx: ^Lib_Context) -> ^Renderer_Settings {
 	if lib_ctx == nil do return nil
-	raw := lib_context_query(lib_ctx, CORE_LIB_INTERFACE_PROJECT_SETTINGS, PROJECT_SETTINGS_API_VERSION)
+	raw := lib_context_query(
+		lib_ctx,
+		CORE_LIB_INTERFACE_PROJECT_SETTINGS,
+		PROJECT_SETTINGS_API_VERSION,
+	)
 	if raw == nil do return nil
 	ps := cast(^Project_Settings)raw
 	return &ps.renderer_settings
@@ -152,30 +182,30 @@ renderer_settings_from_lib :: proc(lib_ctx: ^Lib_Context) -> ^Renderer_Settings 
 //
 DEFAULT_RENDERER_SETTINGS := Renderer_Settings {
 	texture_compression = .BC,
-	generate_mips       = true,
-	max_texture_size    = 4096,
-	colour_space        = .sRGB,
-
-	mesh_optimization   = Mesh_Optimization{
+	generate_mips = true,
+	max_texture_size = 4096,
+	colour_space = .sRGB,
+	mesh_optimization = Mesh_Optimization {
 		vertex_cache_reordering = true,
 		triangle_stripification = false,
 	},
-	lod_count           = 4,
-	lod_simplification  = 0.5,
+	lod_count = 4,
+	lod_simplification = 0.5,
 	oct_encoded_normals = true,
-	vertex_quantization = Vertex_Quantization{
-		position = .F32,
-		uv       = .F32,
-		tangent  = .F32,
-	},
+	vertex_quantization = Vertex_Quantization{position = .F32, uv = .F32, tangent = .F32},
 	index_buffer_format = .U32,
-
-	animation_quantization = Animation_Quantization{
-		rotation    = .U16,
+	animation_quantization = Animation_Quantization {
+		rotation = .U16,
 		translation = .U16,
-		scale       = .U8,
+		scale = .U8,
 	},
 	bone_weight_format = .U8,
+}
+
+DEFAULT_SPATIAL_SETTINGS := Spatial_Settings {
+	cubic      = false,
+	chunk_size = 16,
+	cell_size  = 4,
 }
 
 // inject_default_project_settings populates GLOBAL_PROJECT_SETTINGS with
@@ -187,21 +217,22 @@ DEFAULT_RENDERER_SETTINGS := Renderer_Settings {
 // populated defaults to Project/config/project.toml via
 // `render_project_settings_toml`.
 inject_default_project_settings :: proc() {
-	GLOBAL_PROJECT_SETTINGS.project_name      = "New Project"
-	GLOBAL_PROJECT_SETTINGS.version           = BASEVERSION
+	GLOBAL_PROJECT_SETTINGS.project_name = "New Project"
+	GLOBAL_PROJECT_SETTINGS.version = BASEVERSION
 	GLOBAL_PROJECT_SETTINGS.renderer_settings = DEFAULT_RENDERER_SETTINGS
+	GLOBAL_PROJECT_SETTINGS.spatial_settings = DEFAULT_SPATIAL_SETTINGS
 
 	default_modules := []Project_Module {
-		{name = "Bifrost_Renderer", version = BASEVERSION, enabled = true, required = true},
+		{name = "BF_Renderer", version = BASEVERSION, enabled = true, required = true},
 		{name = "BF_DAG", version = BASEVERSION, enabled = true, required = true},
 		{name = "BF_ECS", version = BASEVERSION, enabled = true, required = true},
 		{name = "BF_Input", version = BASEVERSION, enabled = false},
-		{name = "Miniaudio", version = BASEVERSION, enabled = false},
-		{name = "Box3D_Physics", version = BASEVERSION, enabled = false},
+		{name = "BF_Miniaudio", version = BASEVERSION, enabled = false},
+		{name = "BF_Box3D_Physics", version = BASEVERSION, enabled = false},
 		{name = "ATLAS-RMGUI", version = BASEVERSION, enabled = false},
 		{name = "BF_Scripting", version = BASEVERSION, enabled = false},
 		{name = "BF_Editor", version = BASEVERSION, enabled = false},
-		{name = "ENet", version = BASEVERSION, enabled = false},
+		{name = "BF_ENet", version = BASEVERSION, enabled = false},
 	}
 	for m in default_modules {
 		append(&GLOBAL_PROJECT_SETTINGS.modules, m)
@@ -433,26 +464,46 @@ renderer_settings_inline_into :: proc(doc: ^ts.Document, r: Renderer_Settings) {
 	t: ts.Inline_Table
 	ts.inline_table_init(&t)
 
-	ts.it_add_string(&t, "texture_compression", texture_compression_to_string(r.texture_compression))
-	ts.it_add_bool  (&t, "generate_mips",       r.generate_mips)
-	ts.it_add_int   (&t, "max_texture_size",    int(r.max_texture_size))
-	ts.it_add_string(&t, "colour_space",        colour_space_to_string(r.colour_space))
+	ts.it_add_string(
+		&t,
+		"texture_compression",
+		texture_compression_to_string(r.texture_compression),
+	)
+	ts.it_add_bool(&t, "generate_mips", r.generate_mips)
+	ts.it_add_int(&t, "max_texture_size", int(r.max_texture_size))
+	ts.it_add_string(&t, "colour_space", colour_space_to_string(r.colour_space))
 
 	ts.it_add_bool(&t, "mesh_vertex_cache_reordering", r.mesh_optimization.vertex_cache_reordering)
 	ts.it_add_bool(&t, "mesh_triangle_stripification", r.mesh_optimization.triangle_stripification)
-	ts.it_add_int (&t, "lod_count",                      int(r.lod_count))
-	ts.it_add_float(&t, "lod_simplification",             f64(r.lod_simplification))
-	ts.it_add_bool(&t, "oct_encoded_normals",             r.oct_encoded_normals)
+	ts.it_add_int(&t, "lod_count", int(r.lod_count))
+	ts.it_add_float(&t, "lod_simplification", f64(r.lod_simplification))
+	ts.it_add_bool(&t, "oct_encoded_normals", r.oct_encoded_normals)
 
-	ts.it_add_string(&t, "vertex_quant_position", quant_level_to_string(r.vertex_quantization.position))
-	ts.it_add_string(&t, "vertex_quant_uv",       quant_level_to_string(r.vertex_quantization.uv))
-	ts.it_add_string(&t, "vertex_quant_tangent",  quant_level_to_string(r.vertex_quantization.tangent))
-	ts.it_add_string(&t, "index_buffer_format",   index_format_to_string(r.index_buffer_format))
+	ts.it_add_string(
+		&t,
+		"vertex_quant_position",
+		quant_level_to_string(r.vertex_quantization.position),
+	)
+	ts.it_add_string(&t, "vertex_quant_uv", quant_level_to_string(r.vertex_quantization.uv))
+	ts.it_add_string(
+		&t,
+		"vertex_quant_tangent",
+		quant_level_to_string(r.vertex_quantization.tangent),
+	)
+	ts.it_add_string(&t, "index_buffer_format", index_format_to_string(r.index_buffer_format))
 
-	ts.it_add_string(&t, "anim_quant_rotation",    quant_level_to_string(r.animation_quantization.rotation))
-	ts.it_add_string(&t, "anim_quant_translation", quant_level_to_string(r.animation_quantization.translation))
-	ts.it_add_string(&t, "anim_quant_scale",       quant_level_to_string(r.animation_quantization.scale))
-	ts.it_add_string(&t, "bone_weight_format",     quant_level_to_string(r.bone_weight_format))
+	ts.it_add_string(
+		&t,
+		"anim_quant_rotation",
+		quant_level_to_string(r.animation_quantization.rotation),
+	)
+	ts.it_add_string(
+		&t,
+		"anim_quant_translation",
+		quant_level_to_string(r.animation_quantization.translation),
+	)
+	ts.it_add_string(&t, "anim_quant_scale", quant_level_to_string(r.animation_quantization.scale))
+	ts.it_add_string(&t, "bone_weight_format", quant_level_to_string(r.bone_weight_format))
 
 	append(&doc.entries, ts.Key_Value{key = "renderer_settings", value = t})
 }
@@ -464,10 +515,14 @@ renderer_settings_inline_into :: proc(doc: ^ts.Document, r: Renderer_Settings) {
 @(private)
 texture_compression_to_string :: proc(v: Texture_Compression_Format) -> string {
 	switch v {
-	case .None: return "None"
-	case .BC:   return "BC"
-	case .ASTC: return "ASTC"
-	case .ETC2: return "ETC2"
+	case .None:
+		return "None"
+	case .BC:
+		return "BC"
+	case .ASTC:
+		return "ASTC"
+	case .ETC2:
+		return "ETC2"
 	}
 	return "None"
 }
@@ -475,8 +530,10 @@ texture_compression_to_string :: proc(v: Texture_Compression_Format) -> string {
 @(private)
 colour_space_to_string :: proc(v: Colour_Space) -> string {
 	switch v {
-	case .Linear: return "Linear"
-	case .sRGB:   return "sRGB"
+	case .Linear:
+		return "Linear"
+	case .sRGB:
+		return "sRGB"
 	}
 	return "Linear"
 }
@@ -484,8 +541,10 @@ colour_space_to_string :: proc(v: Colour_Space) -> string {
 @(private)
 index_format_to_string :: proc(v: Index_Buffer_Format) -> string {
 	switch v {
-	case .U16: return "U16"
-	case .U32: return "U32"
+	case .U16:
+		return "U16"
+	case .U32:
+		return "U32"
 	}
 	return "U32"
 }
@@ -493,9 +552,12 @@ index_format_to_string :: proc(v: Index_Buffer_Format) -> string {
 @(private)
 quant_level_to_string :: proc(v: Quantization_Level) -> string {
 	switch v {
-	case .U8:  return "U8"
-	case .U16: return "U16"
-	case .F32: return "F32"
+	case .U8:
+		return "U8"
+	case .U16:
+		return "U16"
+	case .F32:
+		return "F32"
 	}
 	return "F32"
 }

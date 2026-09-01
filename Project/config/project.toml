@@ -3,7 +3,7 @@ version = { major = 0, minor = 0, patch = 1 }
 renderer_settings = { texture_compression = "BC", generate_mips = true, max_texture_size = 4096, colour_space = "sRGB", mesh_vertex_cache_reordering = true, mesh_triangle_stripification = false, lod_count = 4, lod_simplification = 0.5, oct_encoded_normals = true, vertex_quant_position = "F32", vertex_quant_uv = "F32", vertex_quant_tangent = "F32", index_buffer_format = "U32", anim_quant_rotation = "U16", anim_quant_translation = "U16", anim_quant_scale = "U8", bone_weight_format = "U8" }
 
 [[modules]]
-name = "Bifrost_Renderer"
+name = "BF_Renderer"
 enabled = true
 required = true
 version = { major = 0, minor = 0, patch = 1 }
@@ -22,11 +22,11 @@ name = "BF_Input"
 enabled = false
 version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
-name = "Miniaudio"
+name = "BF_Miniaudio"
 enabled = false
 version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
-name = "Box3D_Physics"
+name = "BF_Box3D_Physics"
 enabled = false
 version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
@@ -42,7 +42,7 @@ name = "BF_Editor"
 enabled = false
 version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
-name = "ENet"
+name = "BF_ENet"
 enabled = false
 version = { major = 0, minor = 0, patch = 1 }
 

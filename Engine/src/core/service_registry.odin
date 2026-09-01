@@ -25,7 +25,7 @@ import hm "core:container/handle_map"
 @(private)
 Service_Instance :: struct {
 	handle:   ServiceHandle,
-	owner:    ModuleHandle,
+	owner:    ComponentHandle,
 	name:     string,
 	instance: rawptr,
 	destroy:  proc(instance: rawptr),
@@ -104,7 +104,7 @@ service_registry_get :: proc(
 @(private)
 service_register :: proc(
 	registry: ^Service_Registry,
-	owner: ModuleHandle,
+	owner: ComponentHandle,
 	registration: Service_Registration,
 ) -> (
 	ServiceHandle,
@@ -183,7 +183,7 @@ service_unregister :: proc(registry: ^Service_Registry, handle: ServiceHandle) -
 @(private)
 service_unregister_all_owned :: proc(
 	registry: ^Service_Registry,
-	owner: ModuleHandle,
+	owner: ComponentHandle,
 ) -> int {
 	if registry == nil || !registry.initialized do return 0
 

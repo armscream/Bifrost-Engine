@@ -234,17 +234,17 @@ lib_context_query :: proc(ctx: ^Lib_Context, interface_id: cstring, version: u32
 // rather than risk an ABI mismatch silently working.
 // ============================================================================
 
-CORE_LIB_INTERFACE_MODULE_REGISTRATION   :: "module_registration"
-CORE_LIB_INTERFACE_EXTENSION_REGISTRATION :: "extension_registration"
-CORE_LIB_INTERFACE_PLUGIN_REGISTRATION   :: "plugin_registration"
-CORE_LIB_INTERFACE_SERVICE_REGISTRY       :: "service_registry"
-CORE_LIB_INTERFACE_RESOURCE_REGISTRY      :: "resource_registry"
-CORE_LIB_INTERFACE_EVENT_REGISTRY         :: "event_registry"
-CORE_LIB_INTERFACE_PROJECT_SETTINGS       :: "project_settings"
+CORE_LIB_INTERFACE_COMPONENT_REGISTRATION :: "component_registration"
+CORE_LIB_INTERFACE_COMPONENT_CONTEXT       :: "component_context"
+CORE_LIB_INTERFACE_MODULE_CONTEXT          :: "module_context" // legacy
+CORE_LIB_INTERFACE_SERVICE_REGISTRY        :: "service_registry"
+CORE_LIB_INTERFACE_RESOURCE_REGISTRY       :: "resource_registry"
+CORE_LIB_INTERFACE_EVENT_REGISTRY          :: "event_registry"
+CORE_LIB_INTERFACE_PROJECT_SETTINGS        :: "project_settings"
 
-MODULE_REGISTRATION_API_VERSION    :: u32(1)
-EXTENSION_REGISTRATION_API_VERSION :: u32(1)
-PLUGIN_REGISTRATION_API_VERSION    :: u32(1)
+COMPONENT_REGISTRATION_API_VERSION :: u32(1)
+COMPONENT_CONTEXT_API_VERSION      :: u32(1)
+MODULE_CONTEXT_API_VERSION         :: u32(1)
 SERVICE_REGISTRY_API_VERSION       :: u32(1)
 RESOURCE_REGISTRY_API_VERSION      :: u32(1)
 EVENT_REGISTRY_API_VERSION         :: u32(1)
@@ -259,11 +259,18 @@ PROJECT_SETTINGS_API_VERSION       :: u32(1)
 // directly would only read its own zero-valued copy. Going through
 // lib_context_query routes the lookup to engine memory via this pointer,
 // so DLLs see the same data the engine sees.
+//
+// component_context points at the per-component Component_Context. Every
+// DLL (module / extension / plugin) receives one; the engine allocates
+// it during component_load_one and frees it during unload. Modules can
+// also read the legacy `module_context` pointer (kept for backward
+// compat with code that hasn't migrated yet).
 @(private)
 Core_Lib_Context :: struct {
-	manager:          rawptr, // ^Module_Manager / ^Extension_Manager / ^Plugin_Manager
-	module_context:   ^Module_Context,   // populated only for module DLLs; nil for extensions/plugins
-	project_settings: ^Project_Settings, // engine-owned; passed through so DLLs share the data
+	manager:           rawptr, // ^Component_Manager
+	module_context:    ^Module_Context,   // legacy; nil for non-module components
+	component_context: ^Component_Context, // unified; populated for every component kind
+	project_settings:  ^Project_Settings,
 }
 
 @(private)
@@ -288,15 +295,24 @@ core_lib_query_interface :: proc(
 		if core_ctx.project_settings == nil do return nil
 		return cast(rawptr)core_ctx.project_settings
 
-	case CORE_LIB_INTERFACE_MODULE_REGISTRATION:
-		if version != MODULE_REGISTRATION_API_VERSION do return nil
-		return cast(rawptr)&GLOBAL_MODULE_REGISTRATION_API
-	case CORE_LIB_INTERFACE_EXTENSION_REGISTRATION:
-		if version != EXTENSION_REGISTRATION_API_VERSION do return nil
-		return nil // Reserved for future implementations.
-	case CORE_LIB_INTERFACE_PLUGIN_REGISTRATION:
-		if version != PLUGIN_REGISTRATION_API_VERSION do return nil
-		return nil // Reserved for future implementations.
+	case CORE_LIB_INTERFACE_COMPONENT_REGISTRATION:
+		if version != COMPONENT_REGISTRATION_API_VERSION do return nil
+		return cast(rawptr)&GLOBAL_COMPONENT_REGISTRATION_API
+
+	case CORE_LIB_INTERFACE_COMPONENT_CONTEXT:
+		if version != COMPONENT_CONTEXT_API_VERSION do return nil
+		if user_data == nil do return nil
+		core_ctx := cast(^Core_Lib_Context)user_data
+		if core_ctx.component_context == nil do return nil
+		return cast(rawptr)core_ctx.component_context
+
+	case CORE_LIB_INTERFACE_MODULE_CONTEXT:
+		if version != MODULE_CONTEXT_API_VERSION do return nil
+		if user_data == nil do return nil
+		core_ctx := cast(^Core_Lib_Context)user_data
+		if core_ctx.module_context == nil do return nil
+		return cast(rawptr)core_ctx.module_context
+
 	case CORE_LIB_INTERFACE_SERVICE_REGISTRY:
 		if version != SERVICE_REGISTRY_API_VERSION do return nil
 		return cast(rawptr)&GLOBAL_SERVICE_REGISTRY

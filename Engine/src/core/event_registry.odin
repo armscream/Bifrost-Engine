@@ -21,7 +21,7 @@ import hm "core:container/handle_map"
 @(private)
 Event_Info :: struct {
 	handle:     EventHandle,
-	owner:      ModuleHandle,
+	owner:      ComponentHandle,
 	name:       string,
 	size:       u32,
 	allignment: u32,
@@ -77,7 +77,7 @@ event_registry_get :: proc(
 @(private)
 event_register :: proc(
 	registry: ^Event_Registry,
-	owner: ModuleHandle,
+	owner: ComponentHandle,
 	registration: Event_Registration,
 ) -> (
 	EventHandle,
@@ -130,7 +130,7 @@ event_register :: proc(
 @(private)
 event_unregister_all_owned :: proc(
 	registry: ^Event_Registry,
-	owner: ModuleHandle,
+	owner: ComponentHandle,
 ) -> int {
 	if registry == nil || !registry.initialized do return 0
 

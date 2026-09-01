@@ -39,36 +39,12 @@ BASEVERSION: Version = {
 // ============================================================================
 // HANDLES
 // ============================================================================
-
-ModuleHandle :: struct {
-	idx: u32,
-	gen: u32,
-}
-
-INVALID_MODULE_HANDLE :: ModuleHandle {
-	idx = 0,
-	gen = 0,
-}
-
-ExtensionHandle :: struct {
-	idx: u32,
-	gen: u32,
-}
-
-INVALID_EXTENSION_HANDLE :: ExtensionHandle {
-	idx = 0,
-	gen = 0,
-}
-
-PluginHandle :: struct {
-	idx: u32,
-	gen: u32,
-}
-
-INVALID_PLUGIN_HANDLE :: PluginHandle {
-	idx = 0,
-	gen = 0,
-}
+//
+// ComponentHandle and the related INVALID_COMPONENT_HANDLE constant
+// live in component.odin. The legacy ModuleHandle / ExtensionHandle /
+// PluginHandle names are now type aliases over ComponentHandle, also
+// declared there. ServiceHandle / ResourceHandle / EventHandle are
+// separate so they keep independent gen spaces in the handle_map.
 
 ServiceHandle :: struct {
 	idx: u32,
