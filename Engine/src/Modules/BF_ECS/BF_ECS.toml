@@ -1,10 +1,10 @@
 api_version = 1
 name = "BF_ECS"
 component_kind = "Module"
-type = "ECS"
+type = "Other"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
-description = "ECS for Bifrost Engine."
+description = "Stub ECS module — non-archetypal entity component system, full impl pending."
 flags = ["Runtime"]
 capabilities = ["ECS"]
 dependency_count = 1

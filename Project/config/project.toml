@@ -1,105 +1,57 @@
 project_name = "New Project"
-
-[version]
-major = 0
-minor = 0
-patch = 1
+version = { major = 0, minor = 0, patch = 1 }
+renderer_settings = { texture_compression = "BC", generate_mips = true, max_texture_size = 4096, colour_space = "sRGB", mesh_vertex_cache_reordering = true, mesh_triangle_stripification = false, lod_count = 4, lod_simplification = 0.5, oct_encoded_normals = true, vertex_quant_position = "F32", vertex_quant_uv = "F32", vertex_quant_tangent = "F32", index_buffer_format = "U32", anim_quant_rotation = "U16", anim_quant_translation = "U16", anim_quant_scale = "U8", bone_weight_format = "U8" }
 
 [[modules]]
 name = "Bifrost_Renderer"
 enabled = true
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+required = true
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_DAG"
 enabled = true
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+required = true
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_ECS"
 enabled = true
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+required = true
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_Input"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "Miniaudio"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "Box3D_Physics"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "ATLAS-RMGUI"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_Scripting"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_Editor"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "ENet"
 enabled = false
-[modules.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 
 [[extensions]]
-name = "Example Extension"
+name = "Example_Extension"
 enabled = false
-[extensions.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }
 
 [[plugins]]
 name = "Example Plugin"
 enabled = false
-[plugins.version]
-major = 0
-minor = 0
-patch = 1
-
+version = { major = 0, minor = 0, patch = 1 }

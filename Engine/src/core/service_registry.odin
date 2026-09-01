@@ -177,3 +177,26 @@ service_unregister :: proc(registry: ^Service_Registry, handle: ServiceHandle) -
 	_, _ = hm.remove(&registry.slots, handle)
 	return true
 }
+
+// service_unregister_all_owned drops every service owned by `owner`.
+// Called during module unload so we don't leak service instances.
+@(private)
+service_unregister_all_owned :: proc(
+	registry: ^Service_Registry,
+	owner: ModuleHandle,
+) -> int {
+	if registry == nil || !registry.initialized do return 0
+
+	count := 0
+	it := hm.dynamic_iterator_make(&registry.slots)
+	for service, h in hm.iterate(&it) {
+		if service.owner != owner do continue
+		if existing, found := registry.by_name[service.name]; found {
+			if existing == h do delete_key(&registry.by_name, service.name)
+		}
+		if service.instance != nil && service.destroy != nil do service.destroy(service.instance)
+		_, _ = hm.remove(&registry.slots, h)
+		count += 1
+	}
+	return count
+}

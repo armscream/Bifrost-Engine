@@ -55,6 +55,8 @@ init :: proc(apprunhandle: proc(), run_editor: bool) -> bool {
 	if !extension_manager_init(&GLOBAL_EXTENSION_MANAGER, context.allocator) do return false
 	if !plugin_manager_init(&GLOBAL_PLUGIN_MANAGER, context.allocator) do return false
 	if !service_registry_init(&GLOBAL_SERVICE_REGISTRY, context.allocator) do return false
+	if !resource_registry_init(&GLOBAL_RESOURCE_REGISTRY, context.allocator) do return false
+	if !event_registry_init(&GLOBAL_EVENT_REGISTRY, context.allocator) do return false
 
 	// MODULES
 	if !module_manager_load_project(&GLOBAL_MODULE_MANAGER) do return false
@@ -113,13 +115,23 @@ destroy :: proc() -> bool {
 
 	scheduler_shutdown()
 
-	// UNLOAD + DESTROY (reverse order)
+	// UNLOAD modules FIRST — this drains their services / resources /
+	// events out of the global registries and calls each instance's
+	// destroy() exactly once. Only after that is it safe to destroy
+	// the registries themselves; otherwise the registries' defensive
+	// destroy() would double-free the same instances.
+	module_manager_unload_all(&GLOBAL_MODULE_MANAGER)
+
 	plugin_manager_unload_all(&GLOBAL_PLUGIN_MANAGER)
 	plugin_manager_destroy(&GLOBAL_PLUGIN_MANAGER)
+
 	extension_manager_unload_all(&GLOBAL_EXTENSION_MANAGER)
 	extension_manager_destroy(&GLOBAL_EXTENSION_MANAGER)
+
+	event_registry_destroy(&GLOBAL_EVENT_REGISTRY)
+	resource_registry_destroy(&GLOBAL_RESOURCE_REGISTRY)
 	service_registry_destroy(&GLOBAL_SERVICE_REGISTRY)
-	module_manager_unload_all(&GLOBAL_MODULE_MANAGER)
+
 	module_manager_destroy(&GLOBAL_MODULE_MANAGER)
 
 	APPRUNHANDLE = nil

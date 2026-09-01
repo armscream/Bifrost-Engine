@@ -13,7 +13,7 @@ import "../../Core"
 // === MODULE_IDENTITY (parsed by rbs) ===
 IDENTITY :: Core.Lib_Descriptor {
 	api_version    = Core.LIB_API_VERSION,
-	name           = "DAG",
+	name           = "BF_DAG",
 	version        = Core.Version{0, 0, 1},
 	author         = "armscream",
 	description    = "Stub DAG scheduler — Directed Acyclic Graph task and systems scheduler, full impl pending.",
@@ -35,9 +35,11 @@ MODULE_API := Core.LIB_API {
 	unload     = module_unload,
 }
 
-@(export)
-bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
-	return &MODULE_API
+when #config(BUILDING_BF_DAG_DLL, false) {
+	@(export)
+	bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
+		return &MODULE_API
+	}
 }
 
 module_load :: proc(ctx: ^Core.Lib_Context) -> bool {

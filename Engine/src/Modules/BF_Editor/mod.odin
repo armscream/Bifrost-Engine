@@ -42,9 +42,11 @@ MODULE_API := Core.LIB_API {
 	unload     = module_unload,
 }
 
-@(export)
-bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
-	return &MODULE_API
+when #config(BUILDING_BF_EDITOR_DLL, false) {
+	@(export)
+	bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
+		return &MODULE_API
+	}
 }
 
 module_load :: proc(ctx: ^Core.Lib_Context) -> bool {

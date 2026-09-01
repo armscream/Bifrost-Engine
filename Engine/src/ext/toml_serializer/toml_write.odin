@@ -130,6 +130,13 @@ it_add_int :: proc(it: ^Inline_Table, key: string, value: int) {
     append(it, Key_Value{key = key, value = value})
 }
 
+// it_add_float writes an f64 value. TOML has real float support; the
+// serializer's default int helper can't represent ratios (e.g. LOD
+// simplification factors, gamma values) without a scaling convention.
+it_add_float :: proc(it: ^Inline_Table, key: string, value: f64) {
+    append(it, Key_Value{key = key, value = value})
+}
+
 it_add_bool :: proc(it: ^Inline_Table, key: string, value: bool) {
     append(it, Key_Value{key = key, value = value})
 }
@@ -222,6 +229,10 @@ _write_value :: proc(w: ^Writer, v: Value) {
     }
     if i, ok := v.(int); ok {
         _emit(w, fmt.tprintf("%d", i))
+        return
+    }
+    if f, ok := v.(f64); ok {
+        _emit(w, fmt.tprintf("%g", f))
         return
     }
     if b, ok := v.(bool); ok {

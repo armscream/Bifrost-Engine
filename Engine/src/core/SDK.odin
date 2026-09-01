@@ -167,6 +167,38 @@ service_get :: proc(registry: ^Service_Registry, handle: ServiceHandle) -> rawpt
 }
 
 // ============================================================================
+// RESOURCES
+// ============================================================================
+
+resource_find :: proc(registry: ^Resource_Registry, name: string) -> (ResourceHandle, bool) {
+	if registry == nil || !registry.initialized do return INVALID_RESOURCE_HANDLE, false
+	if len(name) == 0 do return INVALID_RESOURCE_HANDLE, false
+	handle, found := registry.by_name[name]
+	if !found do return INVALID_RESOURCE_HANDLE, false
+	if _, valid := resource_registry_get(registry, handle); !valid do return INVALID_RESOURCE_HANDLE, false
+	return handle, true
+}
+
+resource_get :: proc(registry: ^Resource_Registry, handle: ResourceHandle) -> rawptr {
+	resource, ok := resource_registry_get(registry, handle)
+	if !ok do return nil
+	return resource.instance
+}
+
+// ============================================================================
+// EVENTS
+// ============================================================================
+
+event_find :: proc(registry: ^Event_Registry, name: string) -> (EventHandle, bool) {
+	if registry == nil || !registry.initialized do return INVALID_EVENT_HANDLE, false
+	if len(name) == 0 do return INVALID_EVENT_HANDLE, false
+	handle, found := registry.by_name[name]
+	if !found do return INVALID_EVENT_HANDLE, false
+	if _, valid := event_registry_get(registry, handle); !valid do return INVALID_EVENT_HANDLE, false
+	return handle, true
+}
+
+// ============================================================================
 // EVENTS
 // ============================================================================
 emit_event :: proc(event: rawptr)

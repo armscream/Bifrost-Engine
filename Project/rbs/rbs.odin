@@ -54,11 +54,17 @@ import "../../Engine/src/Core"
 
 PROJECT_CONFIG_PATH :: "../config/project.toml"
 
-ENGINE_MODULES_PATH :: "../../Engine/src/Modules"
-PROJECT_MODULES_PATH :: "../modules"
+ENGINE_MODULES_PATH    :: "../../Engine/src/Modules"
+PROJECT_MODULES_PATH   :: "../modules"
 
-DEBUG_OUTPUT_PATH :: "../bin/Debug"
-EDITOR_OUTPUT_PATH :: "../bin/Editor"
+ENGINE_EXTENSIONS_PATH :: "../../Engine/src/Extensions"
+PROJECT_EXTENSIONS_PATH :: "../extensions"
+
+ENGINE_PLUGINS_PATH    :: "../../Engine/src/Plugins"
+PROJECT_PLUGINS_PATH   :: "../plugins"
+
+DEBUG_OUTPUT_PATH   :: "../bin/Debug"
+EDITOR_OUTPUT_PATH  :: "../bin/Editor"
 RELEASE_OUTPUT_PATH :: "../bin/Release"
 
 ConfigState :: enum {
@@ -139,9 +145,18 @@ load_project_config :: proc() -> Core.Project_Settings {
 	fmt.println("--------------------------------------------------")
 
 	if !os.exists(PROJECT_CONFIG_PATH) {
-		log.error("Project configuration was not found:\n  %s", PROJECT_CONFIG_PATH)
-		CONFIG_STATE = .None
-		return Core.Project_Settings{}
+		// No project.toml on disk: ask Core to seed its in-memory
+		// defaults, then persist that default file to Project/config/
+		// so the engine can find it next launch. pre_build_*
+		// calls seed_default_project_config to actually write the
+		// file; we just need to keep CONFIG_STATE = .Loaded so
+		// pre_build runs (don't bail with .None).
+		log.warn("Project configuration not found: %s", PROJECT_CONFIG_PATH)
+		log.warn("Seeding defaults via Core.inject_default_project_settings().")
+
+		Core.inject_default_project_settings()
+		CONFIG_STATE = .Loaded
+		return Core.project_settings_get()^
 	}
 
 	// ------------------------------------------------------------------------
@@ -225,50 +240,58 @@ normalize_module_name :: proc(input: string) -> string {
 
 
 // ============================================================================
-// RESOLVE MODULE SOURCE
+// RESOLVE COMPONENT SOURCE
 // ============================================================================
 //
-// Search order:
+// Each component kind has its own project/engine source roots. Search
+// order is the same for every kind:
 //
-//     1. Project/modules/<module>
-//     2. Engine/src/Modules/<module>
+//     1. Project/<kind>s/<name>
+//     2. Engine/src/<Kind>s/<name>
 //
-// Project modules override engine modules.
+// Project sources override engine sources of the same name.
 //
 // IMPORTANT:
 //
-// This returns a RELATIVE path.
-//
-// Do not convert it to an absolute path because the RBS command runner
-// currently splits commands on spaces.
+// These return RELATIVE paths. Do not convert them to absolute paths
+// because the RBS command runner currently splits commands on spaces.
 //
 
 resolve_module_source :: proc(input: string) -> string {
-	module := normalize_module_name(input)
+	return _resolve_component_source(input, "module", PROJECT_MODULES_PATH, ENGINE_MODULES_PATH)
+}
+
+resolve_extension_source :: proc(input: string) -> string {
+	return _resolve_component_source(input, "extension", PROJECT_EXTENSIONS_PATH, ENGINE_EXTENSIONS_PATH)
+}
+
+resolve_plugin_source :: proc(input: string) -> string {
+	return _resolve_component_source(input, "plugin", PROJECT_PLUGINS_PATH, ENGINE_PLUGINS_PATH)
+}
+
+@(private)
+_resolve_component_source :: proc(input, kind, project_root, engine_root: string) -> string {
+	name := normalize_module_name(input)
 
 	// ------------------------------------------------------------------------
-	// Project module
+	// Project override
 	// ------------------------------------------------------------------------
 
-	project_source := join_project_path(PROJECT_MODULES_PATH, module)
+	project_source := join_project_path(project_root, name)
 
 	if os.exists(project_source) && os.is_dir(project_source) {
-
-		fmt.printfln("    Project module: %s", project_source)
-
+		fmt.printfln("    Project %s: %s", kind, project_source)
 		return project_source
 	}
 
 	// ------------------------------------------------------------------------
-	// Engine module
+	// Engine fallback
 	// ------------------------------------------------------------------------
 
-	engine_source := join_project_path(ENGINE_MODULES_PATH, module)
+	engine_source := join_project_path(engine_root, name)
 
 	if os.exists(engine_source) && os.is_dir(engine_source) {
-
-		fmt.printfln("    Engine module:  %s", engine_source)
-
+		fmt.printfln("    Engine %s:  %s", kind, engine_source)
 		return engine_source
 	}
 
@@ -277,12 +300,13 @@ resolve_module_source :: proc(input: string) -> string {
 	// ------------------------------------------------------------------------
 	fatal(
 		fmt.aprintf(
-			"ERROR: Required module source was not found:\n\n" +
+			"ERROR: Required %s source was not found:\n\n" +
 			"  %s\n\n" +
 			"Searched:\n" +
 			"  %s\n" +
 			"  %s",
-			module,
+			kind,
+			name,
 			project_source,
 			engine_source,
 		),
@@ -291,25 +315,36 @@ resolve_module_source :: proc(input: string) -> string {
 
 
 // ============================================================================
-// BUILD ONE MODULE DLL
+// BUILD ONE COMPONENT DLL
 // ============================================================================
-build_module :: proc(input: string, profile: rbs.Profile) {
+//
+// `kind_label` is the human label printed in the section header
+// ("module", "extension", "plugin"). `source_resolver` looks up the
+// source directory for the component. Everything else — output paths,
+// flags, command construction, verification — is identical for every
+// component kind because every kind is just an Odin -build-mode:dll.
+//
+build_component :: proc(
+	input, kind_label: string,
+	source_resolver: proc(string) -> string,
+	profile: rbs.Profile,
+) {
 	if input == "" {
 		return
 	}
 
-	module := normalize_module_name(input)
+	name := normalize_module_name(input)
 
 	fmt.println("")
 	fmt.println("--------------------------------------------------")
-	fmt.printfln("Building module: %s", module)
+	fmt.printfln("Building %s: %s", kind_label, name)
 	fmt.println("--------------------------------------------------")
 
 	// ------------------------------------------------------------------------
 	// Resolve source
 	// ------------------------------------------------------------------------
 
-	source := resolve_module_source(module)
+	source := source_resolver(name)
 
 	fmt.printfln("  Source: %s", source)
 
@@ -317,7 +352,7 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	// DLL output
 	// ------------------------------------------------------------------------
 
-	dll_name := fmt.aprintf("%s.dll", module)
+	dll_name := fmt.aprintf("%s.dll", name)
 
 	defer delete(dll_name)
 
@@ -359,7 +394,7 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 		if remove_err != nil {
 			fatal(
 				fmt.aprintf(
-					"ERROR: Could not remove previous module DLL:\n\n" + "  %s\n\n" + "  %s",
+					"ERROR: Could not remove previous component DLL:\n\n" + "  %s\n\n" + "  %s",
 					output,
 					remove_err,
 				),
@@ -368,7 +403,7 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	}
 
 	// ------------------------------------------------------------------------
-	// Module build flags
+	// Build flags
 	// ------------------------------------------------------------------------
 	//
 	// Do NOT inherit profile.flags.
@@ -377,14 +412,22 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	//
 	//     -define:RUN_EDITOR=true
 	//
-	// That define belongs to the executable, not the module DLL.
+	// That define belongs to the executable, not the component DLL.
+	//
+	// We also pass `-define:BUILDING_<NAME>_DLL=true` so that the
+	// component's @export gate (see each mod.odin's `when BUILDING_...`)
+	// is set ONLY when that specific DLL is being built. When another
+	// component (e.g. an extension) imports this package, the flag is
+	// absent and the @export proc is not emitted, so we don't get a
+	// duplicate-symbol link error. rbs generates the flag uniformly
+	// from the DLL name — no per-module hand-maintenance.
 	//
 
-	module_flags := "-debug"
-
+	mode_flag := "-debug"
 	if strings.contains(profile.flags, "-release") {
-		module_flags = "-release"
+		mode_flag = "-release"
 	}
+	component_flags := fmt.tprintf("%s -define:BUILDING_%s_DLL=true", mode_flag, strings.to_upper(name))
 
 	// ------------------------------------------------------------------------
 	// Convert paths for Odin command
@@ -398,16 +441,14 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	// ------------------------------------------------------------------------
 	//
 	// No quotes are used because the current RBS runner splits commands on
-	// spaces.
-	//
-	// The relative paths contain no spaces.
+	// spaces. The relative paths contain no spaces.
 	//
 
 	command := fmt.aprintf(
 		"odin build %s -build-mode:dll -out:%s %s",
 		command_source,
 		command_output,
-		module_flags,
+		component_flags,
 	)
 
 	defer delete(command)
@@ -422,7 +463,7 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	if err != nil {
 		fatal(
 			fmt.aprintf(
-				"ERROR: Failed to build module:\n\n" +
+				"ERROR: Failed to build %s:\n\n" +
 				"  %s\n\n" +
 				"Source:\n" +
 				"  %s\n\n" +
@@ -430,7 +471,8 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 				"  %s\n\n" +
 				"RBS error:\n" +
 				"  %s",
-				module,
+				kind_label,
+				name,
 				source,
 				command,
 				err,
@@ -451,6 +493,19 @@ build_module :: proc(input: string, profile: rbs.Profile) {
 	}
 
 	fmt.printfln("  SUCCESS: %s", output)
+}
+
+// Backwards-compatible alias — older callers used build_module.
+build_module :: proc(input: string, profile: rbs.Profile) {
+	build_component(input, "module", resolve_module_source, profile)
+}
+
+build_extension :: proc(input: string, profile: rbs.Profile) {
+	build_component(input, "extension", resolve_extension_source, profile)
+}
+
+build_plugin :: proc(input: string, profile: rbs.Profile) {
+	build_component(input, "plugin", resolve_plugin_source, profile)
 }
 
 
@@ -500,6 +555,11 @@ build_modules :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
 // ============================================================================
 // BUILD EXTENSIONS
 // ============================================================================
+//
+// Each enabled extension in project.toml becomes a DLL built from
+// Project/extensions/<name> (project override) or
+// Engine/src/Extensions/<name> (engine fallback).
+//
 build_extensions :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
 	if len(settings.extensions) == 0 {
 		return
@@ -512,7 +572,7 @@ build_extensions :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile)
 
 	for e in settings.extensions {
 		if !e.enabled do continue
-		build_module(e.name, profile)
+		build_extension(e.name, profile)
 	}
 }
 
@@ -520,6 +580,12 @@ build_extensions :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile)
 // ============================================================================
 // BUILD PLUGINS
 // ============================================================================
+//
+// Each enabled plugin in project.toml becomes a DLL built from
+// Project/plugins/<name> or Engine/src/Plugins/<name>. Currently the
+// plugin ABI is stubbed in Core (plugins.odin); this still produces a
+// DLL so the loader finds it when the plugin path is wired.
+//
 build_plugins :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
 	if len(settings.plugins) == 0 {
 		return
@@ -532,7 +598,7 @@ build_plugins :: proc(settings: ^Core.Project_Settings, profile: rbs.Profile) {
 
 	for p in settings.plugins {
 		if !p.enabled do continue
-		build_module(p.name, profile)
+		build_plugin(p.name, profile)
 	}
 }
 
@@ -655,11 +721,53 @@ verify_manifests :: proc() {
 
 
 // ============================================================================
+// SEED DEFAULT PROJECT CONFIG
+// ============================================================================
+//
+// When Project/config/project.toml is missing, write one based on Core's
+// already-populated defaults. The default injection happens ONCE — in
+// load_project_config when it detects the missing file. This proc only
+// persists what is already in GLOBAL_PROJECT_SETTINGS; calling inject
+// again here would double the default module/extension/plugin entries.
+//
+// Core's render_project_settings_toml helper is the canonical writer; we
+// just provide the path plumbing here.
+//
+seed_default_project_config :: proc() {
+    if os.exists(PROJECT_CONFIG_PATH) do return
+
+    fmt.println("")
+    fmt.println("--------------------------------------------------")
+    fmt.println("Seeding default project configuration")
+    fmt.println("--------------------------------------------------")
+
+    // os.write_entire_file only creates the file itself; we ensure the
+    // parent dir (Project/config/) exists here. os.make_directory_all is
+    // a no-op if the path already exists.
+    if mkdir_err := os.make_directory_all("../config"); mkdir_err != nil {
+        log.warnf("Could not create ../config: %v", mkdir_err)
+        return
+    }
+
+    toml_text := Core.render_project_settings_toml(Core.project_settings_get()^)
+    defer delete(toml_text)
+
+    if write_err := os.write_entire_file(PROJECT_CONFIG_PATH, transmute([]byte)toml_text); write_err != nil {
+        log.warnf("Could not write default %s: %v", PROJECT_CONFIG_PATH, write_err)
+        return
+    }
+    fmt.printfln("  Wrote default project configuration to %s", PROJECT_CONFIG_PATH)
+}
+
+
+// ============================================================================
 // DEBUG PRE-BUILD
 // ============================================================================
 
 pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
+
+	seed_default_project_config()
 
 	verify_manifests()
 
@@ -684,6 +792,8 @@ pre_build_debug :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
 
+	seed_default_project_config()
+
 	verify_manifests()
 
 	build_modules(&project_config, profile)
@@ -706,6 +816,8 @@ pre_build_editor :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 
 pre_build_release :: proc(ctx: rbs.Context, profile: rbs.Profile) {
 	_ = ctx
+
+	seed_default_project_config()
 
 	verify_manifests()
 

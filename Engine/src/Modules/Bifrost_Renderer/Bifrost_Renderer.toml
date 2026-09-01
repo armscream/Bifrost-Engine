@@ -10,7 +10,7 @@ capabilities = ["Renderer", "GPU", "Materials", "Textures"]
 dependency_count = 1
 
 [[dependencies]]
-name = "DAG"
+name = "BF_DAG"
 min_version = { major = 0, minor = 0, patch = 1 }
 max_version = { major = 9, minor = 9, patch = 9 }
 has_min_version = true

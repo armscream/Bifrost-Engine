@@ -1,10 +1,10 @@
 api_version = 1
 name = "BF_DAG"
 component_kind = "Module"
-type = "Scheduler"
+type = "Other"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
-description = "DAG Scheduler for Bifrost Engine."
+description = "Stub DAG scheduler — Directed Acyclic Graph task and systems scheduler, full impl pending."
 flags = ["Runtime"]
 capabilities = ["Custom"]
 dependency_count = 0

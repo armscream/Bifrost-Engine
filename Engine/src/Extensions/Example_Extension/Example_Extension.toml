@@ -1,16 +1,16 @@
 api_version = 1
-name = "ECS"
-component_kind = "Module"
+name = "Example_Extension"
+component_kind = "Extension"
 type = "Other"
 version = { major = 0, minor = 0, patch = 1 }
 author = "armscream"
-description = "Stub ECS module — non-archetypal entity component system, full impl pending."
+description = "Reference extension: attaches to Bifrost_Renderer and registers a stub pass + material."
 flags = ["Runtime"]
-capabilities = ["ECS"]
+capabilities = ["Renderer", "Materials"]
 dependency_count = 1
 
 [[dependencies]]
-name = "DAG"
+name = "Bifrost_Renderer"
 min_version = { major = 0, minor = 0, patch = 1 }
 max_version = { major = 9, minor = 9, patch = 9 }
 has_min_version = true

@@ -101,6 +101,23 @@ Lib_Flag :: enum u32 {
 	Editor_Only,
 	Runtime,
 	Optional,
+	// TODO(hot-reload): Hot_Reloadable is declared but unimplemented.
+	// Implementation plan (v1.1+):
+	//   1. module_unload_one already calls deactivate → unpromote → DLL
+	//      free → slot release in reverse dependency order.
+	//   2. Add module_reload_one(manager, handle, path) that:
+	//        a) snapshots the module's manifest (descriptor + registrations)
+	//        b) calls module_unload_one
+	//        c) calls module_manager_load with the same path
+	//        d) re-runs dependency resolution on the affected subgraph
+	//        e) re-activates dependents in topo order, calling their
+	//           "rebind" notification (new Module_Context.api field:
+	//           proc(ctx, kind, name, instance)).
+	//   3. Respect Hot_Reloadable at register time: a module that did
+	//      not declare it should refuse reload with a clear error.
+	//   4. Locking: a single global RW lock on the manager during
+	//      reload; modules being reloaded are marked Reloading and
+	//      other modules' systems skip them for one frame.
 	Hot_Reloadable,
 	Provides_Service,
 	Provides_Systems,
@@ -212,24 +229,41 @@ lib_context_query :: proc(ctx: ^Lib_Context, interface_id: cstring, version: u32
 // ============================================================================
 //
 // This is the only place in Core that knows how to map an interface_id to a
-// concrete typed API. The dispatch is purely on the interface_id string;
-// Lib_Context_API itself remains component-type agnostic.
+// concrete typed API. The dispatch is on (interface_id, version); both must
+// match for a non-nil pointer to come back. Mismatched versions return nil
+// rather than risk an ABI mismatch silently working.
 // ============================================================================
 
 CORE_LIB_INTERFACE_MODULE_REGISTRATION   :: "module_registration"
 CORE_LIB_INTERFACE_EXTENSION_REGISTRATION :: "extension_registration"
 CORE_LIB_INTERFACE_PLUGIN_REGISTRATION   :: "plugin_registration"
 CORE_LIB_INTERFACE_SERVICE_REGISTRY       :: "service_registry"
+CORE_LIB_INTERFACE_RESOURCE_REGISTRY      :: "resource_registry"
+CORE_LIB_INTERFACE_EVENT_REGISTRY         :: "event_registry"
+CORE_LIB_INTERFACE_PROJECT_SETTINGS       :: "project_settings"
 
-MODULE_REGISTRATION_API_VERSION   :: u32(1)
+MODULE_REGISTRATION_API_VERSION    :: u32(1)
 EXTENSION_REGISTRATION_API_VERSION :: u32(1)
-PLUGIN_REGISTRATION_API_VERSION   :: u32(1)
+PLUGIN_REGISTRATION_API_VERSION    :: u32(1)
+SERVICE_REGISTRY_API_VERSION       :: u32(1)
+RESOURCE_REGISTRY_API_VERSION      :: u32(1)
+EVENT_REGISTRY_API_VERSION         :: u32(1)
+PROJECT_SETTINGS_API_VERSION       :: u32(1)
 
 // Core_Lib_Context is the host-side user_data handed to every loaded component.
 // Components must call lib_context_query() to obtain typed interfaces.
+//
+// project_settings points at the *engine's* GLOBAL_PROJECT_SETTINGS (NOT
+// the DLL's per-package copy). Core globals are duplicated into every DLL
+// when a package is imported, so a DLL calling `Core.project_settings_get()`
+// directly would only read its own zero-valued copy. Going through
+// lib_context_query routes the lookup to engine memory via this pointer,
+// so DLLs see the same data the engine sees.
 @(private)
 Core_Lib_Context :: struct {
-	manager: rawptr, // ^Module_Manager / ^Extension_Manager / ^Plugin_Manager
+	manager:          rawptr, // ^Module_Manager / ^Extension_Manager / ^Plugin_Manager
+	module_context:   ^Module_Context,   // populated only for module DLLs; nil for extensions/plugins
+	project_settings: ^Project_Settings, // engine-owned; passed through so DLLs share the data
 }
 
 @(private)
@@ -238,16 +272,40 @@ core_lib_query_interface :: proc(
 	interface_id: cstring,
 	version: u32,
 ) -> rawptr {
-	_ = user_data
-	_ = version
 	if interface_id == nil do return nil
+
+	// project_settings is special: it lives in the host's address space
+	// (passed via user_data) and the same pointer is handed back to any
+	// DLL that asks for it. The handle-map-backed registries are still
+	// safe to hand out as rawptrs because the registry's internal
+	// dynamic arrays are *also* engine-owned — the DLL's globals are
+	// never consulted when servicing a query for one of those.
 	switch interface_id {
+	case CORE_LIB_INTERFACE_PROJECT_SETTINGS:
+		if version != PROJECT_SETTINGS_API_VERSION do return nil
+		if user_data == nil do return nil
+		core_ctx := cast(^Core_Lib_Context)user_data
+		if core_ctx.project_settings == nil do return nil
+		return cast(rawptr)core_ctx.project_settings
+
 	case CORE_LIB_INTERFACE_MODULE_REGISTRATION:
+		if version != MODULE_REGISTRATION_API_VERSION do return nil
 		return cast(rawptr)&GLOBAL_MODULE_REGISTRATION_API
-	case CORE_LIB_INTERFACE_EXTENSION_REGISTRATION,
-	     CORE_LIB_INTERFACE_PLUGIN_REGISTRATION,
-	     CORE_LIB_INTERFACE_SERVICE_REGISTRY:
+	case CORE_LIB_INTERFACE_EXTENSION_REGISTRATION:
+		if version != EXTENSION_REGISTRATION_API_VERSION do return nil
 		return nil // Reserved for future implementations.
+	case CORE_LIB_INTERFACE_PLUGIN_REGISTRATION:
+		if version != PLUGIN_REGISTRATION_API_VERSION do return nil
+		return nil // Reserved for future implementations.
+	case CORE_LIB_INTERFACE_SERVICE_REGISTRY:
+		if version != SERVICE_REGISTRY_API_VERSION do return nil
+		return cast(rawptr)&GLOBAL_SERVICE_REGISTRY
+	case CORE_LIB_INTERFACE_RESOURCE_REGISTRY:
+		if version != RESOURCE_REGISTRY_API_VERSION do return nil
+		return cast(rawptr)&GLOBAL_RESOURCE_REGISTRY
+	case CORE_LIB_INTERFACE_EVENT_REGISTRY:
+		if version != EVENT_REGISTRY_API_VERSION do return nil
+		return cast(rawptr)&GLOBAL_EVENT_REGISTRY
 	}
 	return nil
 }

@@ -13,7 +13,7 @@ import "../../Core"
 // === MODULE_IDENTITY (parsed by rbs) ===
 IDENTITY :: Core.Lib_Descriptor {
 	api_version    = Core.LIB_API_VERSION,
-	name           = "ECS",
+	name           = "BF_ECS",
 	version        = Core.Version{0, 0, 1},
 	author         = "armscream",
 	description    = "Stub ECS module — non-archetypal entity component system, full impl pending.",
@@ -22,7 +22,7 @@ IDENTITY :: Core.Lib_Descriptor {
 	flags          = {.Runtime},
 	capabilities   = {.ECS},
 	dependencies   = {{
-		name            = "DAG",
+		name            = "BF_DAG",
 		min_version     = Core.Version{0, 0, 1},
 		max_version     = Core.Version{9, 9, 9},
 		has_max_version = true,
@@ -42,9 +42,11 @@ MODULE_API := Core.LIB_API {
 	unload     = module_unload,
 }
 
-@(export)
-bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
-	return &MODULE_API
+when #config(BUILDING_BF_ECS_DLL, false) {
+	@(export)
+	bifrost_lib_get_api :: proc() -> ^Core.LIB_API {
+		return &MODULE_API
+	}
 }
 
 module_load :: proc(ctx: ^Core.Lib_Context) -> bool {

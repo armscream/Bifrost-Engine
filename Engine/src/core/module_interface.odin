@@ -6,6 +6,7 @@ import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:fmt"
+import "core:strings"
 
 import hm "core:container/handle_map"
 
@@ -60,12 +61,20 @@ Lib_Visit_State :: enum {
 
 Module_Context :: struct {
 	api_version:      u32,
+	// The allocator pointer is owned by the engine; modules must NOT cache
+	// it past their unload() callback — its lifetime is the module's
+	// loaded lifetime, not the DLL's static lifetime.
 	allocator:        rawptr,
 	self:             ModuleHandle,
-	module_registry:  rawptr,
-	service_registry: rawptr,
-	scheduler:        rawptr,
-	events:           rawptr,
+	// Typed pointers (still pointer-sized — ABI-safe). Modules reach
+	// these through lib_context_query("module_registration") /
+	// lib_context_query("service_registry"); we expose the typed fields
+	// here so Core-internal code can dereference without raw casts.
+	module_registry:  ^Module_Registry,
+	service_registry: ^Service_Registry,
+	resource_registry: ^Resource_Registry,
+	event_registry:   ^Event_Registry,
+	scheduler:        rawptr, // DAG service handle lands here in v1.1.
 	registration:     ^Module_Registration_API,
 	// Component-type agnostic host context. Owned by-value so the DLL can
 	// safely hold a pointer to it for the lifetime of the module.
@@ -74,10 +83,13 @@ Module_Context :: struct {
 }
 
 Module_Registration_API :: struct {
-	add_service:  proc(ctx: ^Module_Context, registration: Service_Registration) -> bool,
-	add_system:   proc(ctx: ^Module_Context, registration: System_Registration) -> bool,
-	add_resource: proc(ctx: ^Module_Context, registration: Resource_Registration) -> bool,
-	add_event:    proc(ctx: ^Module_Context, registration: Event_Registration) -> bool,
+	// All procs take ^Lib_Context (the only ABI struct the DLL holds)
+	// rather than ^Module_Context; Core looks up the Module_Context
+	// from Core_Lib_Context internally.
+	add_service:  proc(lib_ctx: ^Lib_Context, registration: Service_Registration) -> bool,
+	add_system:   proc(lib_ctx: ^Lib_Context, registration: System_Registration) -> bool,
+	add_resource: proc(lib_ctx: ^Lib_Context, registration: Resource_Registration) -> bool,
+	add_event:    proc(lib_ctx: ^Lib_Context, registration: Event_Registration) -> bool,
 }
 
 // ============================================================================
@@ -184,6 +196,11 @@ module_registry_destroy :: proc(registry: ^Module_Registry) {
 	for module, _ in hm.iterate(&it) {
 		if module.state != Component_State.Unloaded && module.state != Component_State.Failed {
 			module_registration_destroy(&module.registration)
+		}
+		// Free the cloned identity name (allocated at load time).
+		if len(module.descriptor.identity.name) > 0 {
+			delete(module.descriptor.identity.name, registry.allocator)
+			module.descriptor.identity.name = ""
 		}
 	}
 
@@ -588,7 +605,9 @@ module_manager_load :: proc(manager: ^Module_Manager, path: string) -> (ModuleHa
 	// DLL can hold a pointer to it. Allocate it from the manager allocator
 	// and stash it on Loaded_Module so we can free it in unload_all.
 	core_context := new(Core_Lib_Context, manager.allocator)
-	core_context.manager = cast(rawptr)manager
+	core_context.manager          = cast(rawptr)manager
+	core_context.module_context   = &loaded.ctx
+	core_context.project_settings = &GLOBAL_PROJECT_SETTINGS
 	loaded.core_context = core_context
 
 	lib_context := Lib_Context {
@@ -617,7 +636,10 @@ module_manager_load :: proc(manager: ^Module_Manager, path: string) -> (ModuleHa
 	}
 
 	identity := Module_Identity {
-		name         = descriptor.name != nil ? string(descriptor.name) : "",
+		// strings.clone copies the cstring bytes into Odin-managed
+		// memory so the name survives DLL unload. The clone is freed
+		// in module_manager_unload_all / module_unload_one.
+		name         = descriptor.name != nil ? strings.clone(string(descriptor.name), manager.allocator) : "",
 		version      = descriptor.version,
 		type         = descriptor.type,
 		flags        = descriptor.flags,
@@ -643,34 +665,97 @@ module_manager_load :: proc(manager: ^Module_Manager, path: string) -> (ModuleHa
 	}
 
 	loaded.ctx = Module_Context {
-		api_version      = 1,
-		allocator        = cast(rawptr)&manager.allocator,
-		self             = INVALID_MODULE_HANDLE,
-		module_registry  = cast(rawptr)&manager.registry,
-		service_registry = nil,
-		scheduler        = nil,
-		events           = nil,
-		registration     = &GLOBAL_MODULE_REGISTRATION_API,
-		lib_context      = lib_context,
+		api_version       = 1,
+		allocator         = cast(rawptr)&manager.allocator,
+		self              = INVALID_MODULE_HANDLE,
+		module_registry   = &manager.registry,
+		service_registry  = &GLOBAL_SERVICE_REGISTRY,
+		resource_registry = &GLOBAL_RESOURCE_REGISTRY,
+		event_registry    = &GLOBAL_EVENT_REGISTRY,
+		scheduler         = nil,
+		registration      = &GLOBAL_MODULE_REGISTRATION_API,
+		lib_context       = lib_context,
 	}
 	loaded.state = .Loaded
 
-	// Advance the library lifecycle to .Registered BEFORE adding the slot
-	// to the map. module_register_loaded adds the slot via hm.add, which
-	// copies the struct; if lib.state were still .Loaded at that point the
-	// stored copy would also be .Loaded and downstream loaded_lib_activate()
-	// would fail its state check.
-	if !loaded_lib_register(&loaded.lib, &lib_context) {
-		log.error("[Module] Library register() failed: %s", path)
+	// Add the slot to the handle map BEFORE calling the DLL's register().
+	// The Module_Registration_API requires the module to be in
+	// .Registered state when adding services/resources/events, so the
+	// state must transition first. module_register_loaded also returns
+	// the handle, which is patched into Module_Context.self inside the
+	// resident slot.
+	handle, ok := module_register_loaded(&manager.registry, &loaded)
+	if !ok {
 		loaded_lib_shutdown(&loaded.lib, &lib_context)
 		free(core_context, manager.allocator)
 		return INVALID_MODULE_HANDLE, false
 	}
 
-	handle, ok := module_register_loaded(&manager.registry, &loaded)
-	if !ok {
+	// Re-anchor Core_Lib_Context.module_context to the slot's
+	// Module_Context (whose `self` field is now patched). Pointing at
+	// `&loaded.ctx` (the stack copy) would leave `self ==
+	// INVALID_MODULE_HANDLE` and break every registration API call.
+	resident, found := hm.get(&manager.registry.slots, handle)
+	if !found {
+		log.error("[Module] Slot vanished after add for '%s' (impossible).", path)
 		loaded_lib_shutdown(&loaded.lib, &lib_context)
 		free(core_context, manager.allocator)
+		return INVALID_MODULE_HANDLE, false
+	}
+	core_context.module_context   = &resident.ctx
+	core_context.project_settings = &GLOBAL_PROJECT_SETTINGS
+
+	// Now that the slot is in the map with state == .Registered, drive
+	// the DLL's register() callback. The module adds its services /
+	// resources / events to module.registration.* via the API.
+	api := loaded.lib.loader.api
+	if api == nil || api.register == nil {
+		log.error("[Module] Library register() missing for: %s", path)
+		loaded_lib_shutdown(&loaded.lib, &lib_context)
+		free(core_context, manager.allocator)
+		_ = module_registry_release_slot(&manager.registry, handle)
+		return INVALID_MODULE_HANDLE, false
+	}
+	if !api.register(&loaded.ctx.lib_context) {
+		log.error("[Module] Library register() failed: %s", path)
+		loaded_lib_shutdown(&loaded.lib, &lib_context)
+		free(core_context, manager.allocator)
+		_ = module_registry_release_slot(&manager.registry, handle)
+		return INVALID_MODULE_HANDLE, false
+	}
+
+	// Mirror the .Registered transition on the resident slot's
+	// Loaded_Lib so the later activate/unload checks (which read
+	// lib.state off the resident copy) pass. The module-level state
+	// was already set by module_register_loaded. We do this through
+	// the slot pointer, NOT through `loaded.lib`, because the slot is
+	// the authoritative copy.
+	resident.lib.state = .Registered
+
+	// Promote the services/resources/events the module just declared in
+	// its register() callback into the global registries. Anything that
+	// failed to promote marks the module failed and we tear it down.
+	if !module_promote_registrations(
+		&manager.registry,
+		handle,
+		&GLOBAL_SERVICE_REGISTRY,
+		&GLOBAL_RESOURCE_REGISTRY,
+		&GLOBAL_EVENT_REGISTRY,
+	) {
+		log.error(
+			"[Module] Failed to promote registrations for module '%s'; tearing down.",
+			loaded.descriptor.identity.name,
+		)
+		module_unpromote_registrations(
+			&manager.registry,
+			handle,
+			&GLOBAL_SERVICE_REGISTRY,
+			&GLOBAL_RESOURCE_REGISTRY,
+			&GLOBAL_EVENT_REGISTRY,
+		)
+		loaded_lib_shutdown(&loaded.lib, &lib_context)
+		free(core_context, manager.allocator)
+		_ = module_registry_release_slot(&manager.registry, handle)
 		return INVALID_MODULE_HANDLE, false
 	}
 
@@ -795,6 +880,49 @@ module_manager_deactivate_all :: proc(manager: ^Module_Manager) {
 	}
 }
 
+// module_unload_one is the runtime single-module unload path. Used by
+// future hot-reload and by callers that need to drop a specific module
+// without tearing down the whole manager.
+module_unload_one :: proc(manager: ^Module_Manager, handle: ModuleHandle) -> bool {
+	if manager == nil || !manager.initialized do return false
+	module, ok := module_registry_get(&manager.registry, handle)
+	if !ok do return false
+
+	if module.state == .Active {
+		loaded_lib_deactivate(&module.lib, &module.ctx.lib_context)
+		module.state = .Registered
+	}
+	if module.state == .Registered || module.state == .Loaded {
+		loaded_lib_unload(&module.lib, &module.ctx.lib_context)
+		module.state = .Unloaded
+	}
+
+	module_unpromote_registrations(
+		&manager.registry,
+		handle,
+		&GLOBAL_SERVICE_REGISTRY,
+		&GLOBAL_RESOURCE_REGISTRY,
+		&GLOBAL_EVENT_REGISTRY,
+	)
+
+	if len(module.descriptor.dependencies) > 0 {
+		delete(module.descriptor.dependencies)
+		module.descriptor.dependencies = nil
+	}
+
+	if module.core_context != nil {
+		free(module.core_context, manager.allocator)
+		module.core_context = nil
+	}
+
+	if len(module.descriptor.identity.name) > 0 {
+		delete(module.descriptor.identity.name, manager.allocator)
+		module.descriptor.identity.name = ""
+	}
+
+	return module_registry_release_slot(&manager.registry, handle)
+}
+
 module_manager_unload_all :: proc(manager: ^Module_Manager) {
 	if manager == nil || !manager.initialized do return
 
@@ -805,6 +933,16 @@ module_manager_unload_all :: proc(manager: ^Module_Manager) {
 		handle := order[i]
 		module, ok := module_registry_get(&manager.registry, handle)
 		if !ok do continue
+
+		// Pull registrations out of the global registries and call
+		// destroy() on each instance before we let the DLL unload.
+		module_unpromote_registrations(
+			&manager.registry,
+			handle,
+			&GLOBAL_SERVICE_REGISTRY,
+			&GLOBAL_RESOURCE_REGISTRY,
+			&GLOBAL_EVENT_REGISTRY,
+		)
 
 		if module.state == .Registered || module.state == .Loaded {
 			loaded_lib_unload(&module.lib, &module.ctx.lib_context)
@@ -819,6 +957,11 @@ module_manager_unload_all :: proc(manager: ^Module_Manager) {
 		if module.core_context != nil {
 			free(module.core_context, manager.allocator)
 			module.core_context = nil
+		}
+
+		if len(module.descriptor.identity.name) > 0 {
+			delete(module.descriptor.identity.name, manager.allocator)
+			module.descriptor.identity.name = ""
 		}
 	}
 
@@ -840,6 +983,20 @@ module_manager_unload_all :: proc(manager: ^Module_Manager) {
 // DLL discovery is the simplest possible: <bin>/<module>.dll relative to the
 // process's executable directory. This will be replaced by a real rbs-driven
 // locator once the rbs manifest pipeline is wired end-to-end.
+//
+// TODO(rbs-manifest-codegen): Modules currently hand-write the IDENTITY /
+// MODULE_API block (see Modules/Bifrost_Renderer/mod.odin). The rbs tool
+// should:
+//   1. Parse the `=== MODULE_IDENTITY (parsed by rbs) === ... === END ===`
+//      block to extract the descriptor.
+//   2. Optionally *generate* the block from a higher-level spec (TOML or
+//      Odin struct) so the on-disk manifest and the embedded descriptor
+//      can't drift apart.
+//   3. Drive dependency analysis across modules so dependencies declared
+//      in MODULE_IDENTITY stay in sync with what rbs sees in the source
+//      tree.
+// Until then, keep IDENTITY blocks hand-written and run
+// `./rune manifest --check` in CI.
 // ============================================================================
 
 module_manager_load_project :: proc(manager: ^Module_Manager) -> bool {
@@ -852,8 +1009,8 @@ module_manager_load_project :: proc(manager: ^Module_Manager) -> bool {
 	}
 	defer delete(bin_dir)
 
-	loaded_ok := true
 	loaded_count := 0
+	loaded_failed_required := false
 	for m in GLOBAL_PROJECT_SETTINGS.modules {
 		if !m.enabled do continue
 
@@ -861,12 +1018,24 @@ module_manager_load_project :: proc(manager: ^Module_Manager) -> bool {
 		rel_path, jerr := filepath.join({bin_dir, dll_name}, context.allocator)
 		if jerr != nil {
 			log.error("[Module] Failed to join DLL path for '%s': %v", m.name, jerr)
-			loaded_ok = false
+			if m.required do loaded_failed_required = true
 			continue
 		}
 
 		if !os.exists(rel_path) {
-			log.warn("[Module] DLL not found, skipping: %s", rel_path)
+			// Missing DLL: warn-and-skip. Don't fail unless the project
+			// explicitly marked this module as required — that way a
+			// stale project.toml doesn't nuke the whole engine.
+			if m.required {
+				log.error(
+					"[Module] Required module DLL not found: %s (path=%s)",
+					m.name,
+					rel_path,
+				)
+				loaded_failed_required = true
+			} else {
+				log.warn("[Module] DLL not found, skipping: %s", rel_path)
+			}
 			delete(rel_path)
 			continue
 		}
@@ -875,14 +1044,14 @@ module_manager_load_project :: proc(manager: ^Module_Manager) -> bool {
 		delete(rel_path)
 		if !ok {
 			log.error("[Module] Failed to load module: %s", m.name)
-			loaded_ok = false
+			if m.required do loaded_failed_required = true
 			continue
 		}
 		loaded_count += 1
 		_ = handle
 	}
 
-	if !loaded_ok {
+	if loaded_failed_required {
 		module_manager_unload_all(manager)
 		return false
 	}

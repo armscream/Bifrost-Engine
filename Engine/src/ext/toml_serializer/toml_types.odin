@@ -10,7 +10,7 @@
 //   - arrays of scalars or inline tables
 //   - tables emitted as [[name]] sections (one Document may hold many)
 //
-// We intentionally do NOT support: floats, datetimes, multiline strings,
+// We intentionally do NOT support: datetimes, multiline strings,
 // literal strings, heterogeneous arrays, dotted keys, dotted section names,
 // or non-inline tables. Adding any of these later is a non-breaking change
 // because higher layers use Module_Manifest, not Document.
@@ -23,6 +23,7 @@ package toml_serializer
 Value :: union {
     string,
     int,
+    f64,
     bool,
     Inline_Table,
     Array,
@@ -30,6 +31,7 @@ Value :: union {
 
 is_value_string :: proc(v: Value) -> bool  { _, ok := v.(string);       return ok }
 is_value_int    :: proc(v: Value) -> bool  { _, ok := v.(int);          return ok }
+is_value_float  :: proc(v: Value) -> bool  { _, ok := v.(f64);          return ok }
 is_value_bool   :: proc(v: Value) -> bool  { _, ok := v.(bool);         return ok }
 is_value_inline :: proc(v: Value) -> bool  { _, ok := v.(Inline_Table); return ok }
 is_value_array  :: proc(v: Value) -> bool  { _, ok := v.(Array);        return ok }

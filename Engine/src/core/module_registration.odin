@@ -113,48 +113,69 @@ Event_Registration :: struct {
 // ============================================================================
 //
 // This is the interface exposed to modules. The module receives a
-// Module_Context containing a pointer to this API; the API routes each
-// registration request to the correct registry bucket.
+// Lib_Context and uses lib_context_query to obtain a pointer to this API;
+// the API routes each registration request to the correct registry bucket.
+//
+// We accept ^Lib_Context (the only ABI struct the module holds) and
+// recover the Module_Context from Core_Lib_Context inside each proc.
 // ============================================================================
 
 @(private)
 module_context_add_service :: proc(
-	ctx: ^Module_Context,
+	lib_ctx: ^Lib_Context,
 	registration: Service_Registration,
 ) -> bool {
-	if ctx == nil do return false
-	registry := cast(^Module_Registry)(ctx.module_registry)
-	return module_registration_add_service(registry, ctx.self, registration)
+	core_ctx, mod_ctx, ok := registration_core_ctx(lib_ctx)
+	if !ok do return false
+	_ = core_ctx
+	return module_registration_add_service(mod_ctx.module_registry, mod_ctx.self, registration)
 }
 
 @(private)
 module_context_add_system :: proc(
-	ctx: ^Module_Context,
+	lib_ctx: ^Lib_Context,
 	registration: System_Registration,
 ) -> bool {
-	if ctx == nil do return false
-	registry := cast(^Module_Registry)(ctx.module_registry)
-	return module_registration_add_system(registry, ctx.self, registration)
+	_, mod_ctx, ok := registration_core_ctx(lib_ctx)
+	if !ok do return false
+	return module_registration_add_system(mod_ctx.module_registry, mod_ctx.self, registration)
 }
 
 @(private)
 module_context_add_resource :: proc(
-	ctx: ^Module_Context,
+	lib_ctx: ^Lib_Context,
 	registration: Resource_Registration,
 ) -> bool {
-	if ctx == nil do return false
-	registry := cast(^Module_Registry)(ctx.module_registry)
-	return module_registration_add_resource(registry, ctx.self, registration)
+	_, mod_ctx, ok := registration_core_ctx(lib_ctx)
+	if !ok do return false
+	return module_registration_add_resource(mod_ctx.module_registry, mod_ctx.self, registration)
 }
 
 @(private)
 module_context_add_event :: proc(
-	ctx: ^Module_Context,
+	lib_ctx: ^Lib_Context,
 	registration: Event_Registration,
 ) -> bool {
-	if ctx == nil do return false
-	registry := cast(^Module_Registry)(ctx.module_registry)
-	return module_registration_add_event(registry, ctx.self, registration)
+	_, mod_ctx, ok := registration_core_ctx(lib_ctx)
+	if !ok do return false
+	return module_registration_add_event(mod_ctx.module_registry, mod_ctx.self, registration)
+}
+
+// registration_core_ctx unpacks the Core_Lib_Context and Module_Context
+// from a Lib_Context the DLL handed us. Returns false on any malformed
+// pointer.
+@(private)
+registration_core_ctx :: proc(
+	lib_ctx: ^Lib_Context,
+) -> (
+	^Core_Lib_Context,
+	^Module_Context,
+	bool,
+) {
+	if lib_ctx == nil do return nil, nil, false
+	core_ctx := cast(^Core_Lib_Context)lib_ctx.user_data
+	if core_ctx == nil || core_ctx.module_context == nil do return nil, nil, false
+	return core_ctx, core_ctx.module_context, true
 }
 
 // ============================================================================
@@ -318,4 +339,79 @@ module_registration_add_event :: proc(
 	}
 	append(&module_registration.events, registration)
 	return true
+}
+
+// ============================================================================
+// PROMOTION TO GLOBAL REGISTRIES
+// ============================================================================
+//
+// Module_Registration.services/resources/events are module-local lists
+// built up during the DLL's register() callback. After register()
+// succeeds, we promote them into the engine's global registries so
+// other modules/extensions can resolve them by name through the SDK.
+//
+// Promotion is one-way during a module's lifetime — the module owns the
+// instance memory, the registry owns the lookup. Unpromotion (called
+// during module unload) reverses the effect by calling each instance's
+// destroy callback and clearing the by_name lookup.
+
+@(private)
+module_promote_registrations :: proc(
+	module_registry: ^Module_Registry,
+	module_handle: ModuleHandle,
+	service_registry: ^Service_Registry,
+	resource_registry: ^Resource_Registry,
+	event_registry: ^Event_Registry,
+) -> bool {
+	if module_registry == nil || !module_registry.initialized do return false
+	module, ok := module_registry_get(module_registry, module_handle)
+	if !ok do return false
+
+	for &s in module.registration.services {
+		s_handle, s_ok := service_register(service_registry, module_handle, s)
+		if !s_ok do return false
+		_ = s_handle
+	}
+	for &r in module.registration.resources {
+		r_handle, r_ok := resource_register(resource_registry, module_handle, r)
+		if !r_ok do return false
+		_ = r_handle
+	}
+	for &e in module.registration.events {
+		e_handle, e_ok := event_register(event_registry, module_handle, e)
+		if !e_ok do return false
+		_ = e_handle
+	}
+	return true
+}
+
+@(private)
+module_unpromote_registrations :: proc(
+	module_registry: ^Module_Registry,
+	module_handle: ModuleHandle,
+	service_registry: ^Service_Registry,
+	resource_registry: ^Resource_Registry,
+	event_registry: ^Event_Registry,
+) -> int {
+	if module_registry == nil || !module_registry.initialized do return 0
+	module, ok := module_registry_get(module_registry, module_handle)
+	if !ok do return 0
+
+	count := 0
+	if service_registry != nil {
+		count += service_unregister_all_owned(service_registry, module_handle)
+	}
+	if resource_registry != nil {
+		count += resource_unregister_all_owned(resource_registry, module_handle)
+	}
+	if event_registry != nil {
+		count += event_unregister_all_owned(event_registry, module_handle)
+	}
+
+	// Clear the module's local lists (the instances have been destroyed
+	// by the registry unregister; we just drop the bookkeeping).
+	clear(&module.registration.services)
+	clear(&module.registration.resources)
+	clear(&module.registration.events)
+	return count
 }
