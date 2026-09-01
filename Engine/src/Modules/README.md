@@ -2,19 +2,19 @@
 This repository is part of the BF Engine ecosystem, a collection of modular libraries designed for game development. Each module provides a specific core functionality.
 
 ## Core Modules
-**BF_ECS:** Entity-Component-System (ECS) framework. Provides the foundational architecture for organizing game objects and logic in a high-performance, data-oriented manner. https://github.com/armscream/BF_ECS
+-**BF_ECS:** Entity-Component-System (ECS) framework. Provides the foundational architecture for organizing game objects and logic in a high-performance, data-oriented manner. https://github.com/armscream/BF_ECS
 
-**BF_SDL3_GPU:** Graphics rendering module built on top of SDL3. Handles low-level GPU operations, window creation, and the rendering pipeline. https://github.com/armscream/BF_SDL3_GPU
+-**BF_SDL3_GPU:** Graphics rendering module built on top of SDL3. Handles low-level GPU operations, window creation, and the rendering pipeline. https://github.com/armscream/BF_SDL3_GPU
 
-**BF_Miniaudio:** Audio management module utilizing the Miniaudio library. Responsible for audio backend. https://github.com/armscream/BF_Miniaudio
+-**BF_Miniaudio:** Audio management module utilizing the Miniaudio library. Responsible for audio backend. https://github.com/armscream/BF_Miniaudio
 
-**BF_Box3D_Physics:** 3D physics simulation module porting the Box3D library to Bifrost Engine. https://github.com/armscream/BF_Box3D_Physics
+-**BF_Box3D_Physics:** 3D physics simulation module porting the Box3D library to Bifrost Engine. https://github.com/armscream/BF_Box3D_Physics
 
-**BF_Renderer:** Vulkan and MoltenVK renderer module. https://github.com/armscream/BF_Renderer
+-**BF_Renderer:** Vulkan and MoltenVK renderer module. https://github.com/armscream/BF_Renderer
 
-**BF_Editor:** A planned visual editor tool for the BF Engine. Used for level design, asset management, and configuring game entities and components created with the ECS. https://github.com/armscream/BF_Editor
+-**BF_Editor:** A planned visual editor tool for the BF Engine. Used for level design, asset management, and configuring game entities and components created with the ECS. https://github.com/armscream/BF_Editor
 
-**BF_DAG:** Directed Acyclic Graph (DAG) execution system. Could be used for defining and executing complex, interdependent tasks, such as rendering passes, build pipelines, or complex gameplay events. https://github.com/armscream/BF_DAG
+-**BF_DAG:** Directed Acyclic Graph (DAG) execution system. Could be used for defining and executing complex, interdependent tasks, such as rendering passes, build pipelines, or complex gameplay events. https://github.com/armscream/BF_DAG
 
 
 **How the Module API Works**
