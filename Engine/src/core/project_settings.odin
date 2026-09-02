@@ -7,8 +7,8 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-import toml "../ext/toml_parser"
-import ts "../ext/toml_serializer"
+import toml "../dependencies/toml_parser"
+import ts "../dependencies/toml_serializer"
 
 // ============================================================================
 // RENDERER + ASSET PIPELINE SETTINGS
@@ -226,6 +226,7 @@ inject_default_project_settings :: proc() {
 		{name = "BF_Renderer", version = BASEVERSION, enabled = true, required = true},
 		{name = "BF_DAG", version = BASEVERSION, enabled = true, required = true},
 		{name = "BF_ECS", version = BASEVERSION, enabled = true, required = true},
+		{name = "BF_REP", version = BASEVERSION, enabled = true, required = true},
 		{name = "BF_Input", version = BASEVERSION, enabled = false},
 		{name = "BF_Miniaudio", version = BASEVERSION, enabled = false},
 		{name = "BF_Box3D_Physics", version = BASEVERSION, enabled = false},
@@ -402,7 +403,10 @@ render_project_settings_toml :: proc(s: Project_Settings) -> string {
 	}
 
 	// [renderer_settings] inline table.
-	renderer_settings_inline_into(&doc, s.renderer_settings)
+	renderer_settings_inline_into(&doc, s.renderer_settings) // TODO: make the struct show multi-line
+
+	// [spatial_settings] inline table.
+	spatial_settings_inline_into(&doc, s.spatial_settings) // TODO: create this proc, make the struct show multi-line
 
 	// [[modules]]
 	if len(s.modules) > 0 {
@@ -463,7 +467,7 @@ render_project_settings_toml :: proc(s: Project_Settings) -> string {
 renderer_settings_inline_into :: proc(doc: ^ts.Document, r: Renderer_Settings) {
 	t: ts.Inline_Table
 	ts.inline_table_init(&t)
-
+	log.info("TODO: make the render_settings struct show multi-line")
 	ts.it_add_string(
 		&t,
 		"texture_compression",
