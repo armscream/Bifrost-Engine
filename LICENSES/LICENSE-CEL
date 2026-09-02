@@ -1,0 +1,137 @@
+# COMMERCIAL ENGINE LICENSE (CEL)
+
+Version 1.0
+
+Copyright © Calvin Vandenberg CD All Rights Reserved.
+
+## 1. Grant of License
+
+Subject to compliance with this License and the License Selection Agreement (LSA), the Engine Publisher grants the Licensee a non-exclusive, non-transferable, revocable license to:
+
+* Use the Engine.
+* Modify the Engine.
+* Create Plugins and Extensions.
+* Develop Projects using the Engine.
+* Distribute Projects.
+* Commercially exploit Projects.
+
+Ownership of the Engine remains solely with the Engine Publisher.
+
+## 2. Permitted Monetization
+
+Projects licensed under the CEL may generate revenue through:
+
+* Retail sales.
+* Digital sales.
+* Box sales.
+* Expansion packs.
+* Downloadable content (DLC).
+* Subscription-based access.
+* Merchandise unrelated to in-game functionality.
+* Donations.
+
+## 3. Prohibited Monetization
+
+The following are prohibited:
+
+* Microtransactions.
+* Premium currencies.
+* Virtual currencies.
+* Cosmetic purchases.
+* Loot boxes.
+* Randomized reward systems purchased with real money.
+* Gacha systems.
+* Battle passes.
+* Consumable purchases.
+* Pay-to-win purchases.
+* Gameplay boosts.
+* Real-money item purchases.
+* Any transaction involving the purchase of individual digital items, services, content, advantages, currencies, cosmetics, or unlocks within a Project after acquisition of the Project.
+
+## 4. Attribution Requirements
+
+All publicly distributed Projects shall display:
+
+### Startup Splash
+
+The official Bifrost Engine logo.
+
+The splash screen must:
+
+* Appear during startup.
+* Remain visible for not less than three (3) seconds.
+* Be clearly legible.
+* Not be obscured.
+
+### Copyright Notice
+
+The following notice shall appear:
+
+"Powered by Bifrost Engine. Copyright © Calvin Vandenberg CD"
+
+### Credits
+
+The Project credits shall include:
+
+"Created using the Bifrost Engine."
+
+## 5. Engine Modifications
+
+Licensees may modify Engine Source Code.
+
+Modified Engine Source Code may not be redistributed.
+
+Engine modifications may only be distributed as:
+
+* Patches.
+* Plugins.
+* Extensions.
+
+Redistributing modified Engine Source Code is prohibited.
+
+## 6. Forks
+
+Forks are prohibited.
+
+Licensees shall not:
+
+* Publish Engine forks.
+* Redistribute Engine forks.
+* Create alternative public Engine distributions.
+
+The Engine Publisher remains the sole distributor of official Engine releases.
+
+## 7. Contributions
+
+Contributors retain ownership of their Contributions.
+
+By submitting a Contribution to the Engine, the Contributor grants the Engine Publisher a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use, modify, distribute, sublicense, relicense, and incorporate the Contribution into the Engine.
+
+Contributors may use their Contributions elsewhere under any terms they choose.
+
+Contributions may not be withdrawn after acceptance.
+
+## 8. Relicensing
+
+The Engine Publisher retains the exclusive right to:
+
+* Relicense the Engine.
+* Offer custom licenses.
+* Grant commercial exceptions.
+* Modify future licensing terms.
+
+No such right is granted to Licensees.
+
+## 9. Termination
+
+Violation of this License immediately terminates all rights granted herein.
+
+Upon termination, the Licensee must cease use and distribution of the Engine.
+
+## 10. Disclaimer
+
+THE ENGINE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+THE ENGINE PUBLISHER SHALL NOT BE LIABLE FOR ANY DAMAGES ARISING FROM USE OF THE ENGINE.
+
+END OF COMMERCIAL ENGINE LICENSE

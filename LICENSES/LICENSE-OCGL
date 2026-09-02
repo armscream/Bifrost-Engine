@@ -1,0 +1,162 @@
+# OPEN COMMUNITY GAME LICENSE (OCGL)
+
+Version 1.0
+
+Copyright © Calvin Vandenberg CD All Rights Reserved.
+
+## 1. Purpose
+
+The OCGL exists to support permanently free and open community-developed Projects.
+
+Projects released under the OCGL shall remain free and open forever.
+
+## 2. Grant of License
+
+Subject to compliance with this License and the License Selection Agreement (LSA), the Licensee may:
+
+* Use the Engine.
+* Modify the Engine.
+* Create Plugins.
+* Create Extensions.
+* Create non-commercial Projects.
+* Distribute Projects.
+* Redistribute Project Source Code.
+
+## 3. Mandatory Open Source Distribution
+
+All Public Releases must include:
+
+* Complete Project Source Code.
+* Build instructions.
+* Any Engine Patches required by the Project.
+* Any Project-specific tools required to build the Project.
+
+Source Code must remain publicly accessible.
+
+## 4. Copyleft Requirement
+
+Any derivative work of an OCGL Project must:
+
+* Remain under the OCGL.
+* Remain free of charge.
+* Remain open source.
+
+No recipient may convert an OCGL Project to a proprietary or commercial license.
+
+## 5. Permanent License Requirement
+
+Once a Project is publicly released under the OCGL:
+
+* The Project may not be relicensed under the CEL.
+* The Project may not be relicensed under any commercial license.
+* The Project may not be relicensed under any proprietary license.
+
+This restriction is permanent and irrevocable.
+
+## 6. Permitted Funding
+
+The following are permitted:
+
+* Donations.
+* Crowdfunding donations.
+* Voluntary patronage.
+* Sponsorships not restricting access to the Project.
+
+No contribution may be required to access the Project.
+
+## 7. Prohibited Monetization
+
+The following are prohibited:
+
+* Commercial use.
+* Sale of copies.
+* Paid downloads.
+* Subscription access.
+* DLC sales.
+* Expansion sales.
+* Microtransactions.
+* Cosmetics sales.
+* Loot boxes.
+* Battle passes.
+* Premium currencies.
+* Advertising revenue tied to access to the Project.
+* Any monetization of Project software.
+
+## 8. Attribution Requirements
+
+All Public Releases shall display:
+
+### Startup Splash
+
+The official Bifrost Engine logo.
+
+The splash screen must:
+
+* Appear during startup.
+* Remain visible for not less than three (3) seconds.
+* Be clearly legible.
+* Not be obscured.
+
+### Copyright Notice
+
+The following notice shall appear:
+
+"Powered by Bifrost Engine. Copyright © Calvin Vandenberg CD"
+
+### Credits
+
+The Project credits shall include:
+
+"Created using the Bifrost Engine."
+
+## 9. Engine Modifications
+
+Engine modifications may only be distributed as:
+
+* Patches.
+* Plugins.
+* Extensions.
+
+Redistribution of modified Engine Source Code is prohibited.
+
+Public Engine forks are prohibited.
+
+The Engine Publisher remains the sole distributor of official Engine releases.
+
+## 10. Project Contributions
+
+Contributors retain ownership of their individual Contributions.
+
+By contributing to an OCGL Project, the Contributor grants the Project and all recipients of the Project a perpetual, irrevocable, worldwide, royalty-free license to:
+
+* Use.
+* Modify.
+* Distribute.
+* Reproduce.
+* Create derivative works from.
+
+the Contribution as part of the Project.
+
+Contributors may continue using their Contributions elsewhere under any terms they choose.
+
+Contributions may not be withdrawn after acceptance.
+
+Contributors gain no ownership, governance, veto, or approval rights over the Project.
+
+## 11. Engine Contributions
+
+Contributions to the Engine are governed by the Contribution provisions of the License Selection Agreement.
+
+## 12. Termination
+
+Violation of this License immediately terminates all rights granted herein.
+
+Any Project distributed after termination shall be considered unlicensed.
+
+## 13. Disclaimer
+
+THE ENGINE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+THE ENGINE PUBLISHER SHALL NOT BE LIABLE FOR ANY DAMAGES ARISING FROM USE OF THE ENGINE.
+
+END OF OPEN COMMUNITY GAME LICENSE
