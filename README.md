@@ -6,18 +6,19 @@
 cd into Project and run: odin build ./rbs -out:rune.exe 
 this builds the rune.exe which you will need to build the engine and all modules.
 
-Run rune.exe with 
-./rune run EDITOR - runs engine with "-vet -debug -define:RUN_EDITOR=true" and will also build the editor module
-./rune run DEBUG - runs engine with "-vet -debug" - will not build the editor module
-./rune run RELEASE - runs engine with "-vet -release" - will not build the editor module
-./rune manifest produces .toml manifest files for all components (modules/extensions/plugins)
-./rune manifest --check exits 1 on a stale manifest
-This will build all dependencies listed in project.toml for the configuration you are running, as well as the executable into the bin directory. It also copies the assets, config, and scripts folders into the bin directory. It is recommended to only have .odin files directly under /Project.
+**Run rune.exe with* 
+- ./rune run EDITOR - runs engine with "-vet -debug -define:RUN_EDITOR=true" and will also build the editor module
+- ./rune run DEBUG - runs engine with "-vet -debug" - will not build the editor module
+- ./rune run RELEASE - runs engine with "-vet -release" - will not build the editor module
+- ./rune manifest produces .toml manifest files for all components (modules/extensions/plugins)
+- ./rune manifest --check exits 1 on a stale manifest
+- This will build all dependencies listed in project.toml for the configuration you are running, as well as the executable into the bin directory. It also copies the assets, config, and scripts folders into the bin directory. It is recommended to only have .odin files directly under /Project.
 
-**Plans:**
-Currently this only supports windows, I will later add support for linux and mac with .so and .dylib files and compilation targets.
+## Plans:
+Currently this only supports windows, I will later add support for linux and mac with .so and .dylib files and platform-specific compilation targets.
+Core Modules will provide all the features you would expect from a game engine, the benefit is that you will be able to swap out modules for other ones that provide the same services. Most Core modules will also be designed to be extensible, and hopefully this will allow for easy customization, and for the ability to run your project as lean as possible, or with a curated set of features.
 
-**How the component system works:**
+## How the component system works:
 Engine will run with or without any components, however some components will be required for certain features. Core features like rendering, physics, audio, input, etc are singletons. You cannot load two renderer components at once.
 List all components req'd in your project.toml, if you do not have one, run the engine once to generate one.
 Anytime you update the engine, it is recommended to delete your project.toml file and run the engine again to generate an updated project.toml file. - Further info on components are in Engine/src/Modules/README.md.
