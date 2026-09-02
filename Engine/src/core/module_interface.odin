@@ -15,12 +15,6 @@ package Core
 
 import "core:mem"
 
-import hm "core:container/handle_map"
-
-// ============================================================================
-// MODULE CONTEXT (legacy view)
-// ============================================================================
-
 Module_Context :: struct {
 	api_version:       u32,
 	allocator:         rawptr,
@@ -36,20 +30,26 @@ Module_Context :: struct {
 
 Module_Registration_API :: Component_Registration_API
 
-// ============================================================================
-// MODULE REGISTRY (compatibility view)
-// ============================================================================
-
 // Module_Registry is a bit-identical layout view of Component_Registry.
-// The fields map 1:1; helpers below forward through the cast.
+//
+// Originally redeclared here as a full struct with the same field list,
+// including `slots: hm.Dynamic_Handle_Map(Loaded_Component, ComponentHandle)`.
+// That duplication forced the Odin constraint solver to walk the
+// `Dynamic_Handle_Map` `where` clause twice against `Loaded_Component`,
+// which combined with the rest of the package's type graph produced an
+// exponential blowup that deadlocked the parser's worker threads during
+// `odin check` on Core. (Workaround was `-thread-count:1`; the fix is to
+// share the instantiation.)
+//
+// Now embedded as a single-field struct over Component_Registry so the
+// generic instantiation lives in only one place. Layout is bit-identical
+// (single field, same alignment/size rules as the underlying struct), so
+// the existing casts `(^Component_Registry)(registry)` in this file's
+// helpers and `cast(^Module_Registry)&GLOBAL_MODULE_MANAGER.registry` in
+// component.odin remain valid — Odin accepts the cross-cast between
+// layout-identical single-field-wrapper structs and the wrapped type.
 Module_Registry :: struct {
-	allocator:        mem.Allocator,
-	slots:            hm.Dynamic_Handle_Map(Loaded_Component, ComponentHandle),
-	by_name:          map[string]ComponentHandle,
-	by_type:          [Lib_Type][dynamic]ComponentHandle,
-	dependency_order: [dynamic]ComponentHandle,
-	dependency_state: [dynamic]Lib_Visit_State,
-	initialized:      bool,
+	_: Component_Registry,
 }
 
 Loaded_Module       :: Loaded_Component

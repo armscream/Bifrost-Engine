@@ -14,6 +14,7 @@ this builds the rune.exe which you will need to build the engine and all modules
 - ./rune run EDITOR - runs engine with "-vet -debug -define:RUN_EDITOR=true" and will also build the editor module
 - ./rune run DEBUG - runs engine with "-vet -debug" - will not build the editor module
 - ./rune run RELEASE - runs engine with "-vet -release" - will not build the editor module
+- ./rune build <EDITOR|DEBUG|RELEASE> will build but not run
 - ./rune manifest produces .toml manifest files for all components (modules/extensions/plugins)
 - ./rune manifest --check exits 1 on a stale manifest
 - This will build all dependencies listed in project.toml for the configuration you are running, as well as the executable into the bin directory. It also copies the assets, config, and scripts folders into the bin directory. It is recommended to only have .odin files directly under /Project.

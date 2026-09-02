@@ -14,8 +14,8 @@ required = true
 version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_ECS"
-enabled = true
-required = true
+enabled = false
+required = false
 version = { major = 0, minor = 0, patch = 1 }
 [[modules]]
 name = "BF_Input"

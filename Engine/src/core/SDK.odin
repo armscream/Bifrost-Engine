@@ -2,7 +2,6 @@
 package Core
 
 import "core:log"
-import "core:mem"
 
 // ============================================================================
 // SDK
@@ -48,21 +47,21 @@ engine_delta_time :: proc() -> f32 {
 
 extension_find :: proc(registry: ^Extension_Registry, name: string) -> (ExtensionHandle, bool) {
 	if registry == nil do return INVALID_EXTENSION_HANDLE, false
-	return component_lookup_by_name(cast(^Component_Registry)registry, name)
+	return component_lookup_by_name(registry, name)
 }
 
 extension_is_loaded :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
 	if registry == nil do return false
-	return component_is_loaded(cast(^Component_Registry)registry, handle)
+	return component_is_loaded(registry, handle)
 }
 
 extension_is_active :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
 	if registry == nil do return false
-	return component_is_active(cast(^Component_Registry)registry, handle)
+	return component_is_active(registry, handle)
 }
 
 extension_version :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> Version {
-	ext, ok := component_registry_get(cast(^Component_Registry)registry, handle)
+	ext, ok := component_registry_get(registry, handle)
 	if !ok do return Version{}
 	return ext.descriptor.version
 }

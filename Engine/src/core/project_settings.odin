@@ -512,6 +512,21 @@ renderer_settings_inline_into :: proc(doc: ^ts.Document, r: Renderer_Settings) {
 	append(&doc.entries, ts.Key_Value{key = "renderer_settings", value = t})
 }
 
+// spatial_settings_inline_into writes the `[spatial_settings]` block.
+// Always emitted so consumers can rely on the section's existence after
+// reading project.toml; default values flow through DEFAULT_SPATIAL_SETTINGS
+// in inject_default_project_settings.
+@(private)
+spatial_settings_inline_into :: proc(doc: ^ts.Document, s: Spatial_Settings) {
+	t: ts.Inline_Table
+	ts.inline_table_init(&t)
+	ts.it_add_bool(&t, "cubic", s.cubic)
+	ts.it_add_int(&t, "chunk_size", int(s.chunk_size))
+	ts.it_add_float(&t, "cell_size", f64(s.cell_size))
+
+	append(&doc.entries, ts.Key_Value{key = "spatial_settings", value = t})
+}
+
 // ------------------------------------------------------------------------
 // Enum -> string converters used by both TOML emission and logging
 // ------------------------------------------------------------------------

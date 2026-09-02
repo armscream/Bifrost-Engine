@@ -1,8 +1,6 @@
 // Engine\src\Core\engine.odin
 //
-// Engine entry points. Lifecycle (init / run / destroy) and the
-// scheduler wiring. The bulk of the manager code now lives in
-// component.odin (unified Module/Extension/Plugin).
+// Engine entry points. Lifecycle (init / run / destroy) and the scheduler wiring. 
 package Core
 
 import "core:fmt"
@@ -14,7 +12,6 @@ import hm "core:container/handle_map"
 
 // ============================================================================
 // GLOBAL REGISTRIES / MANAGERS
-// ============================================================================
 //
 // Engine-owned singletons. All manager init/destroy is driven from
 // engine.init / engine.destroy in this file.
@@ -58,10 +55,7 @@ GLOBAL_APP_INTERFACE: ^Engine_App_Interface
 RUN_EDITOR: bool = false
 ENGINE_RUNNING: bool = false
 
-// =============================================================================
-// LIFECYCLE INIT (defer-based rollback on partial failure)
-// =============================================================================
-
+//* LIFECYCLE INIT (defer-based rollback on partial failure)
 init :: proc(app: ^Engine_App_Interface, run_editor: bool) -> bool {
 	context.logger = log.create_console_logger()
 	inject_default_project_settings()
@@ -201,18 +195,11 @@ registry_init_with_rollback :: proc(
 // (mgr_*_to_registry helpers removed — registry_init_with_rollback
 // now accepts rawptr and casts at the call site.)
 
-// =============================================================================
-// ENGINE QUIT
-// =============================================================================
-
 engine_quit :: proc() {
 	ENGINE_RUNNING = false
 }
 
-// =============================================================================
-// ENGINE RUN — frame loop driver
-// =============================================================================
-
+//* ENGINE RUN — frame loop driver
 run :: proc() {
 	fmt.println("")
 	fmt.println("========================================")
@@ -290,10 +277,7 @@ run :: proc() {
 	fmt.println("ENGINE RUN EXITED")
 }
 
-// =============================================================================
-// ENGINE DESTROY
-// =============================================================================
-
+//* ENGINE DESTROY
 destroy :: proc() -> bool {
 	cleanup_project_settings(project_settings_get())
 	fmt.println("")
@@ -339,8 +323,7 @@ destroy :: proc() -> bool {
 }
 
 // =============================================================================
-// SCHEDULER WIRING
-// =============================================================================
+//* SCHEDULER WIRING
 
 GLOBAL_SCHEDULER_SERVICE: ^Scheduler_Service
 
