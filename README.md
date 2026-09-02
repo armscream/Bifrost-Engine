@@ -2,6 +2,8 @@
 
 ![Bifrost Engine Logo](Engine\src\assets\Bifrost_Engine_Logo.png)   
 
+## An ECS based 3D Game Engine Written In Odin
+
 ## How to build:
 cd into Project and run: odin build ./rbs -out:rune.exe 
 this builds the rune.exe which you will need to build the engine and all modules.
