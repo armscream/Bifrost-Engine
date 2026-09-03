@@ -21,9 +21,7 @@ import "core:log"
 // the corresponding module is loaded so missing-module bugs are loud.
 // ============================================================================
 
-// ============================================================================
-// ENGINE
-// ============================================================================
+//* ENGINE
 engine_is_editor  :: proc() -> bool { return RUN_EDITOR }
 engine_is_running :: proc() -> bool { return ENGINE_RUNNING }
 engine_delta_time :: proc() -> f32 {
@@ -32,44 +30,26 @@ engine_delta_time :: proc() -> f32 {
 	return 0
 }
 
-// ============================================================================
-// MODULES
-// ============================================================================
-//
-// Module-side lookup helpers are defined in module_interface.odin so
-// they can be called from non-SDK code paths (scheduler_build, engine
-// init). The SDK exposes them transparently through Core's package
-// binding.
-
-// ============================================================================
-// EXTENSIONS
-// ============================================================================
-
+//* EXTENSIONS
 extension_find :: proc(registry: ^Extension_Registry, name: string) -> (ExtensionHandle, bool) {
 	if registry == nil do return INVALID_EXTENSION_HANDLE, false
 	return component_lookup_by_name(registry, name)
 }
-
 extension_is_loaded :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
 	if registry == nil do return false
 	return component_is_loaded(registry, handle)
 }
-
 extension_is_active :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> bool {
 	if registry == nil do return false
 	return component_is_active(registry, handle)
 }
-
 extension_version :: proc(registry: ^Extension_Registry, handle: ExtensionHandle) -> Version {
 	ext, ok := component_registry_get(registry, handle)
 	if !ok do return Version{}
 	return ext.descriptor.version
 }
 
-// ============================================================================
-// SERVICES
-// ============================================================================
-
+//* SERVICES
 service_find :: proc(registry: ^Service_Registry, name: string) -> (ServiceHandle, bool) {
 	if registry == nil || !registry.initialized do return INVALID_SERVICE_HANDLE, false
 	if len(name) == 0 do return INVALID_SERVICE_HANDLE, false
@@ -78,7 +58,6 @@ service_find :: proc(registry: ^Service_Registry, name: string) -> (ServiceHandl
 	if _, valid := service_registry_get(registry, handle); !valid do return INVALID_SERVICE_HANDLE, false
 	return handle, true
 }
-
 // service_get returns the service instance for the given handle.
 service_get :: proc(registry: ^Service_Registry, handle: ServiceHandle) -> rawptr {
 	service, ok := service_registry_get(registry, handle)
@@ -86,10 +65,7 @@ service_get :: proc(registry: ^Service_Registry, handle: ServiceHandle) -> rawpt
 	return service.instance
 }
 
-// ============================================================================
-// RESOURCES
-// ============================================================================
-
+//* RESOURCES
 resource_find :: proc(registry: ^Resource_Registry, name: string) -> (ResourceHandle, bool) {
 	if registry == nil || !registry.initialized do return INVALID_RESOURCE_HANDLE, false
 	if len(name) == 0 do return INVALID_RESOURCE_HANDLE, false
@@ -105,10 +81,7 @@ resource_get :: proc(registry: ^Resource_Registry, handle: ResourceHandle) -> ra
 	return resource.instance
 }
 
-// ============================================================================
-// EVENTS
-// ============================================================================
-
+//* EVENTS
 event_find :: proc(registry: ^Event_Registry, name: string) -> (EventHandle, bool) {
 	if registry == nil || !registry.initialized do return INVALID_EVENT_HANDLE, false
 	if len(name) == 0 do return INVALID_EVENT_HANDLE, false
@@ -118,10 +91,6 @@ event_find :: proc(registry: ^Event_Registry, name: string) -> (EventHandle, boo
 	return handle, true
 }
 
-// ============================================================================
-// EVENTS
-// ============================================================================
-//
 // emit_event pushes an event payload onto the engine's event bus. The
 // bus itself is owned by a future module; until then this is a stub
 // that warns so missing-module bugs are obvious during development.
@@ -130,9 +99,7 @@ emit_event :: proc(event: rawptr) {
 	log.warn("[SDK] emit_event: event bus not implemented yet; event dropped.")
 }
 
-// ============================================================================
-// ASSETS
-// ============================================================================
+//* ASSETS
 asset_load   :: proc(path: string) -> rawptr {
 	_ = path
 	log.warn("[SDK] asset_load: asset subsystem not implemented yet.")
@@ -143,9 +110,7 @@ asset_unload :: proc(asset: rawptr) {
 	log.warn("[SDK] asset_unload: asset subsystem not implemented yet.")
 }
 
-// ============================================================================
-// GAME-SIDE SYSTEM REGISTRATION
-// ============================================================================
+//* GAME-SIDE SYSTEM REGISTRATION
 //
 // Game code (i.e. the application embedding the engine) registers systems
 // here during Engine_App_Interface.on_init. Modules register theirs through
@@ -232,9 +197,7 @@ engine_register_system_dependency :: proc(before_name, after_name: string) -> bo
 	return true
 }
 
-// ============================================================================
-// ECS
-// ============================================================================
+//* ECS
 //
 // entity_create / entity_destroy are owned by the BF_ECS module. Until
 // that module is loaded these stubs warn and return nil so a missing
@@ -248,9 +211,7 @@ entity_destroy :: proc(entity: rawptr) {
 	log.warn("[SDK] entity_destroy: BF_ECS not loaded.")
 }
 
-// ============================================================================
-// RENDERING
-// ============================================================================
+//* RENDERING
 //
 // Renderers register Submit / Present as DAG systems with stage
 // .Render / .PostRender rather than going through these procs. These
@@ -263,17 +224,13 @@ renderer_end_frame :: proc() {
 	log.warn("[SDK] renderer_end_frame: deprecated. Register a .PostRender system instead.")
 }
 
-// ============================================================================
-// AUDIO
-// ============================================================================
+//* AUDIO
 audio_play :: proc(sound: rawptr) {
 	_ = sound
 	log.warn("[SDK] audio_play: audio module not loaded.")
 }
 
-// ============================================================================
-// PHYSICS
-// ============================================================================
+//* PHYSICS
 physics_raycast :: proc() -> bool {
 	log.warn("[SDK] physics_raycast: physics module not loaded.")
 	return false

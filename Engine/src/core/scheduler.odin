@@ -43,9 +43,7 @@ System_Info :: struct {
 	flags:      u32,
 }
 
-// ============================================================================
-// SYSTEM ENTRY
-// ============================================================================
+//* SYSTEM ENTRY
 //
 // System_Entry is the scheduler-side view of a registered system. The
 // engine collects these from each module's registration.systems during
@@ -54,10 +52,8 @@ System_Info :: struct {
 // identifiers across a recompile.
 
 System_Entry :: struct {
-	name:     string,
-	callback: proc(rawptr),
-	info:     System_Info,
-	id:       System_ID,
+	frame: ^Scheduler_Frame,
+	worker_id: int, // Worker executing this node.
 }
 
 System_Dependency :: struct {
@@ -65,26 +61,18 @@ System_Dependency :: struct {
 	after:  System_ID,
 }
 
-// ============================================================================
-// OPAQUE HANDLES
-// ============================================================================
-
+//* OPAQUE HANDLES
 World_Handle :: struct {
 	ptr: rawptr,
 }
-
 Engine_Handle :: struct {
 	ptr: rawptr,
 }
 
-// ============================================================================
-// FRAME CONTEXT
-// ============================================================================
-//
+//* FRAME CONTEXT
 // Scheduler_Frame is the per-frame context that flows into every
 // system's callback as a rawptr. Systems cast it back to
 // ^Scheduler_Frame to read the world, engine, dt, and frame_index.
-
 Scheduler_Frame :: struct {
 	world:       World_Handle,
 	engine:      Engine_Handle,
@@ -92,9 +80,7 @@ Scheduler_Frame :: struct {
 	frame_index: u64,
 }
 
-// ============================================================================
-// SCHEDULER SERVICE VTABLE
-// ============================================================================
+//* SCHEDULER SERVICE VTABLE
 //
 // Scheduler_Service is the vtable the engine calls into once all modules
 // have registered their systems. Registered under the service name
@@ -105,10 +91,8 @@ Scheduler_Frame :: struct {
 // Cross-ABI data (System_Entry slice, Scheduler_Frame) is passed as
 // rawptr + length — both ends agree on the layout because the types
 // live here in Core.
-
 Scheduler_Service :: struct {
 	instance: rawptr,
-
 	// build compiles a Frame_DAG from the systems the engine gathered
 	// from every loaded module.
 	//   systems_ptr / systems_count : []System_Entry
@@ -122,36 +106,27 @@ Scheduler_Service :: struct {
 		deps_count: int,
 		allocator: mem.Allocator,
 	) -> bool,
-
 	// begin_frame resets per-frame runtime state and enqueues root nodes.
 	// frame_ptr points at a caller-owned Scheduler_Frame whose storage
 	// must outlive the matching wait() call.
 	begin_frame: proc(service: ^Scheduler_Service, frame_ptr: rawptr),
-
 	// run drains the DAG on the calling (main) thread.
 	run: proc(service: ^Scheduler_Service),
-
 	// wait blocks the calling thread until every worker (including
 	// the main worker that ran `run`) has finished the current frame.
 	wait: proc(service: ^Scheduler_Service),
-
 	// start_workers spawns the worker thread pool. Must be called
 	// after build() and before the first begin_frame().
 	start_workers: proc(service: ^Scheduler_Service),
-
 	// destroy tears the scheduler down. Called by the service registry
 	// via Service_Registration.destroy.
 	destroy: proc(service: ^Scheduler_Service),
 }
 
-// ============================================================================
-// HELPERS
-// ============================================================================
-
+//* HELPERS
 access_mask_empty :: proc() -> Access_Mask {
 	return Access_Mask{bits = 0}
 }
-
 access_mask_from_bits :: proc(bits: u64) -> Access_Mask {
 	return Access_Mask{bits = bits}
 }
