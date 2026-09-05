@@ -145,3 +145,7 @@ access_mask_empty :: proc() -> Access_Mask {
 access_mask_from_bits :: proc(bits: u64) -> Access_Mask {
 	return Access_Mask{bits = bits}
 }
+scheduler_service_worker_count :: proc(service: ^Scheduler_Service) -> int {
+	if service == nil || service.worker_count == nil do return 0
+	return service.worker_count(service)
+}
