@@ -40,7 +40,6 @@ System_Info :: struct {
 	read_mask:  Access_Mask,
 	write_mask: Access_Mask,
 	stage:      System_Stage,
-	flags:      u32,
 }
 
 //* SYSTEM ENTRY
@@ -52,8 +51,10 @@ System_Info :: struct {
 // identifiers across a recompile.
 
 System_Entry :: struct {
-	frame: ^Scheduler_Frame,
-	worker_id: int, // Worker executing this node.
+	info:     System_Info,
+	id:       System_ID,
+	name:     string,
+	callback: proc(rawptr),
 }
 
 System_Dependency :: struct {
@@ -80,6 +81,19 @@ Scheduler_Frame :: struct {
 	frame_index: u64,
 }
 
+//* SYSTEM EXECUTION CONTEXT
+// This is created by the scheduler for each system invocation.
+//
+// `worker_id` is the worker that ACTUALLY claimed/executed the DAG node.
+// It must not be confused with Frame_DAG.owner_worker or preferred_worker.
+//
+// The context is execution-local and must not be retained by a system.
+// Execution-local state supplied by BF_DAG.
+Scheduler_System_Context :: struct {
+	frame:     ^Scheduler_Frame,
+	worker_id: int,
+}
+
 //* SCHEDULER SERVICE VTABLE
 //
 // Scheduler_Service is the vtable the engine calls into once all modules
@@ -92,13 +106,13 @@ Scheduler_Frame :: struct {
 // rawptr + length — both ends agree on the layout because the types
 // live here in Core.
 Scheduler_Service :: struct {
-	instance: rawptr,
+	instance:      rawptr,
 	// build compiles a Frame_DAG from the systems the engine gathered
 	// from every loaded module.
 	//   systems_ptr / systems_count : []System_Entry
 	//   deps_ptr / deps_count       : []System_Dependency
 	// The caller owns the slices; the service does NOT free them.
-	build: proc(
+	build:         proc(
 		service: ^Scheduler_Service,
 		systems_ptr: rawptr,
 		systems_count: int,
@@ -109,18 +123,18 @@ Scheduler_Service :: struct {
 	// begin_frame resets per-frame runtime state and enqueues root nodes.
 	// frame_ptr points at a caller-owned Scheduler_Frame whose storage
 	// must outlive the matching wait() call.
-	begin_frame: proc(service: ^Scheduler_Service, frame_ptr: rawptr),
+	begin_frame:   proc(service: ^Scheduler_Service, frame_ptr: rawptr),
 	// run drains the DAG on the calling (main) thread.
-	run: proc(service: ^Scheduler_Service),
+	run:           proc(service: ^Scheduler_Service),
 	// wait blocks the calling thread until every worker (including
 	// the main worker that ran `run`) has finished the current frame.
-	wait: proc(service: ^Scheduler_Service),
+	wait:          proc(service: ^Scheduler_Service),
 	// start_workers spawns the worker thread pool. Must be called
 	// after build() and before the first begin_frame().
 	start_workers: proc(service: ^Scheduler_Service),
 	// destroy tears the scheduler down. Called by the service registry
 	// via Service_Registration.destroy.
-	destroy: proc(service: ^Scheduler_Service),
+	destroy:       proc(service: ^Scheduler_Service),
 }
 
 //* HELPERS

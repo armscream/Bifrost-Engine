@@ -36,9 +36,8 @@ Service_Registration :: struct {
 
 System_Registration :: struct {
 	name:    string,
-	execute: proc(ctx: rawptr),
+	execute: proc(rawptr),
 	info:    System_Info,
-	flags:   u32,
 }
 
 Resource_Registration :: struct {
