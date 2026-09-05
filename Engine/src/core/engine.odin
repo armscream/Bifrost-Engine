@@ -393,10 +393,6 @@ scheduler_build :: proc() -> bool {
 		for reg_sys in module.registration.systems {
 			id := System_ID(next_id)
 			info := reg_sys.info
-			if info.stage == System_Stage.PreStartup && reg_sys.execute != nil {
-				// Module-supplied info wins; default stage is .Update.
-				if reg_sys.flags != 0 do info.flags = reg_sys.flags
-			}
 			entry := System_Entry {
 				name     = reg_sys.name,
 				callback = reg_sys.execute,
