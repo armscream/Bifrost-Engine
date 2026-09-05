@@ -135,6 +135,7 @@ Scheduler_Service :: struct {
 	// destroy tears the scheduler down. Called by the service registry
 	// via Service_Registration.destroy.
 	destroy:       proc(service: ^Scheduler_Service),
+	worker_count: proc(service: ^Scheduler_Service) -> int,
 }
 
 //* HELPERS
